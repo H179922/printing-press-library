@@ -15,9 +15,9 @@ func newBillingListCmd(flags *rootFlags) *cobra.Command {
 	var flagSessionId string
 
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "Public endpoint. Returns the API key stored during pricing-checkout, then deletes it. Key expires after 1 hour if...",
-		Example: "  multimail-pp-cli billing list --session-id 550e8400-e29b-41d4-a716-446655440000",
+		Use:         "list",
+		Short:       "Public endpoint. Returns the API key stored during pricing-checkout, then deletes it. Key expires after 1 hour if...",
+		Example:     "  multimail-pp-cli billing list --session-id 550e8400-e29b-41d4-a716-446655440000",
 		Annotations: map[string]string{"pp:endpoint": "billing.list", "pp:method": "GET", "pp:path": "/v1/billing/session-key", "mcp:read-only": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !cmd.Flags().Changed("session-id") && !flags.dryRun {
@@ -45,8 +45,10 @@ func newBillingListCmd(flags *rootFlags) *cobra.Command {
 			}
 			// For JSON output, wrap with provenance envelope before passing through flags.
 			// --select wins over --compact when both are set; --compact only runs when
-			// no explicit fields were requested.
-			if flags.asJSON || !isTerminal(cmd.OutOrStdout()) {
+			// no explicit fields were requested. Explicit format flags (--csv, --quiet,
+			// --plain) opt out of the auto-JSON path so piped consumers that asked for
+			// a non-JSON format reach the standard pipeline below.
+			if flags.asJSON || (!isTerminal(cmd.OutOrStdout()) && !flags.csv && !flags.quiet && !flags.plain) {
 				filtered := data
 				if flags.selectFields != "" {
 					filtered = filterFields(filtered, flags.selectFields)

@@ -5,10 +5,9 @@ package cli
 
 import (
 	"fmt"
-	"os"
-
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/config"
 	"github.com/spf13/cobra"
+	"multimail-pp-cli/internal/config"
+	"os"
 )
 
 func newAuthCmd(flags *rootFlags) *cobra.Command {
@@ -17,6 +16,7 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 		Short: "Manage authentication for Multimail",
 	}
 
+	cmd.AddCommand(newAuthSetupCmd(flags))
 	cmd.AddCommand(newAuthStatusCmd(flags))
 	cmd.AddCommand(newAuthSetTokenCmd(flags))
 	cmd.AddCommand(newAuthLogoutCmd(flags))
@@ -24,10 +24,37 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 	return cmd
 }
 
+// newAuthSetupCmd prints concrete steps for getting a credential. Side-effect
+// rule: print by default, --launch opt-in to open the URL, short-circuit when
+// the verifier is running this in a sandboxed subprocess.
+func newAuthSetupCmd(_ *rootFlags) *cobra.Command {
+	var launch bool
+	cmd := &cobra.Command{
+		Use:     "setup",
+		Short:   "Print steps for obtaining a credential (use --launch to open the URL)",
+		Example: "  multimail-pp-cli auth setup\n  multimail-pp-cli auth setup --launch",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			w := cmd.OutOrStdout()
+			fmt.Fprintln(w, "No setup URL is configured for this CLI; check the API's docs.")
+			fmt.Fprintln(w, "")
+			fmt.Fprintln(w, "Then set:")
+			fmt.Fprintln(w, "  export MULTIMAIL_BEARER_AUTH=\"<your-token>\"")
+			fmt.Fprintln(w, "  multimail-pp-cli auth set-token <token>")
+			if !launch {
+				return nil
+			}
+			fmt.Fprintln(cmd.ErrOrStderr(), "no setup URL configured; cannot launch")
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&launch, "launch", false, "Open the setup URL in your default browser")
+	return cmd
+}
+
 func newAuthStatusCmd(flags *rootFlags) *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
-		Short: "Show authentication status",
+		Use:     "status",
+		Short:   "Show authentication status",
 		Example: "  multimail-pp-cli auth status",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(flags.configPath)
@@ -38,12 +65,13 @@ func newAuthStatusCmd(flags *rootFlags) *cobra.Command {
 			w := cmd.OutOrStdout()
 			header := cfg.AuthHeader()
 			authed := header != ""
-			// JSON envelope: {authenticated, source, config}. When not
+			// JSON envelope: {authenticated, verified, source, config}. When not
 			// authenticated, write the envelope first then return authErr
 			// so exit code carries the auth-failure signal.
 			if flags.asJSON {
 				out := map[string]any{
 					"authenticated": authed,
+					"verified":      false,
 					"source":        cfg.AuthSource,
 					"config":        cfg.Path,
 				}
@@ -64,7 +92,7 @@ func newAuthStatusCmd(flags *rootFlags) *cobra.Command {
 				return authErr(fmt.Errorf("no credentials configured"))
 			}
 
-			fmt.Fprintln(w, green("Authenticated"))
+			fmt.Fprintln(w, green("Credentials present (not verified)"))
 			fmt.Fprintf(w, "  Source: %s\n", cfg.AuthSource)
 			fmt.Fprintf(w, "  Config: %s\n", cfg.Path)
 			return nil
@@ -74,10 +102,10 @@ func newAuthStatusCmd(flags *rootFlags) *cobra.Command {
 
 func newAuthSetTokenCmd(flags *rootFlags) *cobra.Command {
 	return &cobra.Command{
-		Use:   "set-token <token>",
-		Short: "Save an API token to the config file",
+		Use:     "set-token <token>",
+		Short:   "Save an API token to the config file",
 		Example: "  multimail-pp-cli auth set-token YOUR_TOKEN_HERE",
-		Args:  cobra.ExactArgs(1),
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(flags.configPath)
 			if err != nil {
@@ -110,8 +138,8 @@ func newAuthSetTokenCmd(flags *rootFlags) *cobra.Command {
 
 func newAuthLogoutCmd(flags *rootFlags) *cobra.Command {
 	return &cobra.Command{
-		Use:   "logout",
-		Short: "Clear stored credentials",
+		Use:     "logout",
+		Short:   "Clear stored credentials",
 		Example: "  multimail-pp-cli auth logout",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(flags.configPath)

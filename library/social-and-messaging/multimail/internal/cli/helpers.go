@@ -4,10 +4,15 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"io"
+	"multimail-pp-cli/internal/client"
+	"multimail-pp-cli/internal/cliutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,10 +21,6 @@ import (
 	"text/tabwriter"
 	"time"
 	"unicode"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/cliutil"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/client"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 var As = errors.As
@@ -93,11 +94,11 @@ type cliError struct {
 func (e *cliError) Error() string { return e.err.Error() }
 func (e *cliError) Unwrap() error { return e.err }
 
-func usageErr(err error) error    { return &cliError{code: 2, err: err} }
-func notFoundErr(err error) error { return &cliError{code: 3, err: err} }
-func authErr(err error) error     { return &cliError{code: 4, err: err} }
-func apiErr(err error) error      { return &cliError{code: 5, err: err} }
-func configErr(err error) error   { return &cliError{code: 10, err: err} }
+func usageErr(err error) error     { return &cliError{code: 2, err: err} }
+func notFoundErr(err error) error  { return &cliError{code: 3, err: err} }
+func authErr(err error) error      { return &cliError{code: 4, err: err} }
+func apiErr(err error) error       { return &cliError{code: 5, err: err} }
+func configErr(err error) error    { return &cliError{code: 10, err: err} }
 func rateLimitErr(err error) error { return &cliError{code: 7, err: err} }
 
 // dryRunOK reports whether the command should short-circuit without doing any
@@ -129,6 +130,120 @@ type accessWarning struct {
 	Status  int    // HTTP status when applicable; 0 for GraphQL field-level denials.
 	Reason  string // "forbidden" | "insufficient_access" | "unauthenticated"
 	Message string // human-readable detail (the API's body or GraphQL error message)
+}
+
+// syncErrorJSON returns a one-line JSON sync_error event. When err wraps a
+// *client.APIError, the structured status/method/path/body fields let
+// operators see the API's response body without parsing a wrapped error
+// string — required for diagnosing 4xx responses on endpoints whose OpenAPI
+// spec marks filter params optional but the API treats them as required.
+//
+// parent is non-empty only on the dependent-resource path, where it
+// identifies which parent ID's child request failed.
+func syncErrorJSON(resource, parent string, err error) string {
+	payload := struct {
+		Event    string `json:"event"`
+		Resource string `json:"resource"`
+		Parent   string `json:"parent,omitempty"`
+		Status   int    `json:"status,omitempty"`
+		Method   string `json:"method,omitempty"`
+		Path     string `json:"path,omitempty"`
+		Body     string `json:"body,omitempty"`
+		Error    string `json:"error"`
+	}{
+		Event:    "sync_error",
+		Resource: resource,
+		Parent:   parent,
+		Error:    err.Error(),
+	}
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) {
+		payload.Status = apiErr.StatusCode
+		payload.Method = apiErr.Method
+		payload.Path = apiErr.Path
+		payload.Body = apiErr.Body
+	}
+	out, _ := json.Marshal(payload)
+	return string(out)
+}
+
+// syncUserParams carries user-supplied query parameters injected into every
+// sync HTTP request. perResource entries win over global on key conflict.
+type syncUserParams struct {
+	global      map[string]string
+	perResource map[string]map[string]string
+}
+
+// parseSyncUserParams parses the repeatable --param key=value and
+// --resource-param resource:key=value flags. Returns usage errors keyed on the
+// specific invalid token so the user sees which entry was rejected.
+func parseSyncUserParams(globalFlags, perResourceFlags []string) (*syncUserParams, error) {
+	p := &syncUserParams{
+		global:      map[string]string{},
+		perResource: map[string]map[string]string{},
+	}
+	for _, kv := range globalFlags {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			return nil, fmt.Errorf("invalid --param %q: expected key=value", kv)
+		}
+		p.global[k] = v
+	}
+	for _, spec := range perResourceFlags {
+		resource, kv, ok := strings.Cut(spec, ":")
+		if !ok || resource == "" {
+			return nil, fmt.Errorf("invalid --resource-param %q: expected resource:key=value", spec)
+		}
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			return nil, fmt.Errorf("invalid --resource-param %q: expected resource:key=value", spec)
+		}
+		if p.perResource[resource] == nil {
+			p.perResource[resource] = map[string]string{}
+		}
+		p.perResource[resource][k] = v
+	}
+	return p, nil
+}
+
+// applyTo merges user params into the request map. Called after spec-derived
+// params (cursor, since, page-size, dates) so user flags can override them.
+func (p *syncUserParams) applyTo(resource string, params map[string]string) {
+	if p == nil {
+		return
+	}
+	for k, v := range p.global {
+		params[k] = v
+	}
+	for k, v := range p.perResource[resource] {
+		params[k] = v
+	}
+}
+
+// validateResourceNames returns a usage-shaped error when any --resource-param
+// key targets a resource not in known. Without this check a typo
+// (e.g. --resource-param chanels:mine=true) is a silent no-op: the param
+// never matches a real resource and sync proceeds with missing rows.
+func (p *syncUserParams) validateResourceNames(known []string) error {
+	if p == nil || len(p.perResource) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(known))
+	for _, r := range known {
+		set[r] = struct{}{}
+	}
+	var unknown []string
+	for r := range p.perResource {
+		if _, ok := set[r]; !ok {
+			unknown = append(unknown, r)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	sort.Strings(unknown)
+	return fmt.Errorf("--resource-param references unknown resource(s): %s (known: %s)",
+		strings.Join(unknown, ", "), strings.Join(known, ", "))
 }
 
 // accessDenialPatterns matches API error bodies that indicate the request was
@@ -250,6 +365,7 @@ func classifyAPIError(err error, flags *rootFlags) error {
 		return apiErr(err)
 	}
 }
+
 // classifyDeleteError maps DELETE errors and supports explicit idempotent no-op handling.
 func classifyDeleteError(err error, flags *rootFlags) error {
 	msg := err.Error()
@@ -283,10 +399,14 @@ func replacePathParam(path, name, value string) string {
 func paginatedGet(c interface {
 	GetWithHeaders(path string, params map[string]string, headers map[string]string) (json.RawMessage, error)
 }, path string, params map[string]string, headers map[string]string, fetchAll bool, cursorParam, nextCursorPath, hasMoreField string) (json.RawMessage, error) {
-	// Clean zero-value params
+	// Cursor params are exempt from the "0"/"false" strip: offset-paginated
+	// APIs send offset=0 on the first page.
 	clean := map[string]string{}
 	for k, v := range params {
-		if v != "" && v != "0" && v != "false" {
+		if v == "" {
+			continue
+		}
+		if k == cursorParam || (v != "0" && v != "false") {
 			clean[k] = v
 		}
 	}
@@ -590,12 +710,31 @@ func compactFields(data json.RawMessage) json.RawMessage {
 }
 
 // compactListFields keeps only high-gravity fields for array responses.
+// When an item carries none of these keys the original is preserved, so
+// `--agent` does not silently emit {} for APIs whose response shapes use
+// domain-specific field names (travel: airline/destination; commerce: vendor).
 func compactListFields(items []map[string]any) json.RawMessage {
 	keepFields := map[string]bool{
+		// Identity
 		"id": true, "name": true, "title": true, "identifier": true,
-		"status": true, "state": true, "type": true, "priority": true,
-		"url": true, "email": true, "key": true,
+		"code": true, "slug": true, "key": true,
+		// Categorization
+		"status": true, "state": true, "type": true, "kind": true, "priority": true,
+		// Communication
+		"url": true, "email": true,
+		// Monetary
+		"price": true, "amount": true, "cost": true, "fare": true,
+		"rate": true, "currency": true,
+		// Metrics
+		"rating": true, "score": true, "count": true,
+		// Locale / geo
+		"language": true, "locale": true, "country": true, "region": true,
+		"city": true, "domain": true,
+		// Temporal
 		"created_at": true, "updated_at": true, "createdAt": true, "updatedAt": true,
+		"date": true,
+		// Versioning
+		"version": true,
 	}
 
 	filtered := make([]map[string]any, 0, len(items))
@@ -605,6 +744,9 @@ func compactListFields(items []map[string]any) json.RawMessage {
 			if keepFields[k] {
 				compact[k] = v
 			}
+		}
+		if len(compact) == 0 {
+			compact = item
 		}
 		filtered = append(filtered, compact)
 	}
@@ -1169,12 +1311,13 @@ func findField(obj map[string]any, names ...string) string {
 	}
 	return ""
 }
+
 // DataProvenance describes where data came from and when it was last synced.
 type DataProvenance struct {
 	Source       string     `json:"source"`                  // "live" or "local"
-	SyncedAt    *time.Time `json:"synced_at,omitempty"`     // when local data was last synced
-	Reason      string     `json:"reason,omitempty"`        // why local was used: "user_requested", "api_unreachable", "no_search_endpoint"
-	ResourceType string    `json:"resource_type,omitempty"` // which resource type was queried
+	SyncedAt     *time.Time `json:"synced_at,omitempty"`     // when local data was last synced
+	Reason       string     `json:"reason,omitempty"`        // why local was used: "user_requested", "api_unreachable", "no_search_endpoint"
+	ResourceType string     `json:"resource_type,omitempty"` // which resource type was queried
 	Freshness    any        `json:"freshness,omitempty"`     // optional machine-owned freshness metadata for covered command paths
 }
 
@@ -1211,12 +1354,50 @@ func printProvenance(cmd *cobra.Command, count int, prov DataProvenance) {
 	fmt.Fprintf(cmd.ErrOrStderr(), "%s%d results (cached, synced %s)\n", prefix, count, age)
 }
 
+// unwrapSingleKeyArray flattens single-key collection envelopes
+// ({"results":[...]}, {"data":[...]}, etc.) so the agent envelope
+// emits a stable .results[] across APIs. Multi-key objects pass
+// through so cursor/pagination fields stay accessible; non-array
+// values pass through so non-collection responses aren't reshaped.
+//
+// The wrapper-key set is intentionally narrower than
+// extractPaginatedItems (which also walks domain-specific keys like
+// "messages", "members", "values" used by social/messaging APIs).
+// This helper only flattens canonical collection envelopes for
+// --json output; the pagination walker has a broader remit.
+func unwrapSingleKeyArray(data json.RawMessage) json.RawMessage {
+	leading := bytes.TrimLeft(data, " \t\r\n")
+	if len(leading) == 0 || leading[0] != '{' {
+		return data
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return data
+	}
+	if len(obj) != 1 {
+		return data
+	}
+	for key, val := range obj {
+		if key != "results" && key != "data" && key != "items" && key != "nodes" && key != "entries" && key != "records" {
+			return data
+		}
+		trimmed := bytes.TrimLeft(val, " \t\r\n")
+		if len(trimmed) == 0 || trimmed[0] != '[' {
+			return data
+		}
+		return val
+	}
+	return data
+}
+
 // wrapWithProvenance wraps response data in a provenance envelope:
 // {"results": ..., "meta": {...}}. When data is valid JSON, it embeds as
 // the parsed shape; when data is non-JSON (e.g., XML/RSS responses, plain
 // text), it embeds as a JSON string so json.Marshal doesn't choke on
 // "invalid character '<'" while still passing the raw payload through to
-// the consumer.
+// the consumer. Single-key array envelopes from the API (e.g.
+// {"results": [...]}, {"data": [...]}) are unwrapped first so the output
+// shape is the same regardless of the API's wrapper key.
 func wrapWithProvenance(data json.RawMessage, prov DataProvenance) (json.RawMessage, error) {
 	meta := map[string]any{"source": prov.Source}
 	if prov.SyncedAt != nil {
@@ -1231,8 +1412,10 @@ func wrapWithProvenance(data json.RawMessage, prov DataProvenance) (json.RawMess
 	if prov.Freshness != nil {
 		meta["freshness"] = prov.Freshness
 	}
-	var results any = json.RawMessage(data)
-	if !json.Valid(data) {
+	var results any
+	if json.Valid(data) {
+		results = json.RawMessage(unwrapSingleKeyArray(data))
+	} else {
 		results = string(data)
 	}
 	envelope := map[string]any{

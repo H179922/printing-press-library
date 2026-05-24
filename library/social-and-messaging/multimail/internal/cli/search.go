@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/store"
 	"github.com/spf13/cobra"
+	"multimail-pp-cli/internal/store"
 )
 
 // isNilOrEmpty checks whether a JSON object has nil or empty values for

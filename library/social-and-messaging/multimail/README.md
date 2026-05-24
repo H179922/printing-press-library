@@ -1,6 +1,8 @@
-# Multimail CLI
+# MultiMail CLI
 
-CLI for [MultiMail](https://multimail.dev) — verifiable identity and graduated oversight for AI agents over email. Five autonomy modes from read-only to fully autonomous. Inbound email → markdown, outbound markdown → HTML.
+**Every MultiMail feature, plus cross-mailbox search, oversight analytics, and trust ladder tracking no other tool has.**
+
+Full CLI access to MultiMail's agent email platform. Manage mailboxes, send and read emails, configure oversight modes, and manage sending allowlists. Local SQLite cache with FTS5 search enables cross-mailbox queries, oversight velocity tracking, and trust progression analysis that the API alone cannot provide.
 
 ## Install
 
@@ -50,37 +52,77 @@ Install the pp-multimail skill from https://github.com/mvanhorn/printing-press-l
 
 ## Quick Start
 
-### 1. Install
-
-See [Install](#install) above.
-
-### 2. Set Up Credentials
-
-Get your access token from your API provider's developer portal, then store it:
-
 ```bash
-multimail-pp-cli auth set-token YOUR_TOKEN_HERE
-```
-
-Or set it via environment variable:
-
-```bash
-export MULTIMAIL_BEARER_AUTH="your-token-here"
-```
-
-### 3. Verify Setup
-
-```bash
+# Verify API key and connectivity
 multimail-pp-cli doctor
+
+
+# Cache all mailboxes and emails locally
+multimail-pp-cli sync --full
+
+
+# See your mailbox fleet
+multimail-pp-cli mailboxes list --json
+
+
+# Search across all mailboxes at once
+multimail-pp-cli search 'meeting notes' --json --select subject,from,mailbox
+
+
+# See trust ladder progression fleet-wide
+multimail-pp-cli trust status --json
+
 ```
 
-This checks your configuration and credentials.
+## Unique Features
 
-### 4. Try Your First Command
+These capabilities aren't available in any other tool for this API.
 
-```bash
-multimail-pp-cli account list
-```
+### Local state that compounds
+- **`search`** — Full-text search across all synced mailboxes at once — find any email regardless of which mailbox received it.
+
+  _When an agent needs to find a specific email and doesn't know which mailbox has it, one search beats iterating._
+
+  ```bash
+  multimail-pp-cli search 'invoice Q2' --json --select subject,from,mailbox
+  ```
+- **`mailboxes allowlist coverage`** — See what percentage of recent recipients are covered by allowlist patterns vs gated.
+
+  _Before adding allowlist entries, an agent should know which recipients are already covered and which cause the most gating friction._
+
+  ```bash
+  multimail-pp-cli mailboxes allowlist coverage --mailbox primary --days 30 --json
+  ```
+- **`inbox health`** — Per-mailbox health snapshot: unread count, oldest unread age, reply rate, and thread depth.
+
+  _An agent monitoring its own inbox health can detect when it's falling behind on replies before the operator notices._
+
+  ```bash
+  multimail-pp-cli inbox health --json
+  ```
+- **`mailboxes threads stale`** — List conversation threads with no reply in N days — surfaces dropped conversations.
+
+  _A dropped conversation thread is a customer-facing failure; this is the agent's early warning system._
+
+  ```bash
+  multimail-pp-cli mailboxes threads stale --days 3 --json
+  ```
+
+### Agent-native plumbing
+- **`oversight velocity`** — See approval/rejection rates and median decision latency per mailbox across your entire fleet.
+
+  _When an agent's sends are stuck in approval queues, this pinpoints which mailbox's operator is the bottleneck._
+
+  ```bash
+  multimail-pp-cli oversight velocity --json --days 7
+  ```
+- **`trust status`** — Fleet-wide view of each mailbox's oversight mode, time-at-level, and upgrade history.
+
+  _Before requesting a trust upgrade, an agent should know which mailboxes are ready and which have been at their current level longest._
+
+  ```bash
+  multimail-pp-cli trust status --json
+  ```
 
 ## Usage
 
@@ -105,6 +147,14 @@ Manage admin
 
 - **`multimail-pp-cli admin create`** - Admin-only. Creates a new API key and emails it to the tenant's oversight email. Used when welcome email failed or KV expired before key retrieval.
 
+### agent
+
+Manage agent
+
+- **`multimail-pp-cli agent create`** - Initiates agent registration using verified_email identity assertion. Sends a 6-digit OTP to the provided email and returns a claim_token for completing the registration.
+- **`multimail-pp-cli agent create-auth`** - Completes the auth.md registration by validating the claim_token and OTP. On success, atomically creates the tenant account and returns API credentials.
+- **`multimail-pp-cli agent list`** - Human-facing page that displays the 6-digit OTP for agent registration. Linked from the verification email.
+
 ### api-keys
 
 Manage api keys
@@ -126,6 +176,12 @@ Manage approve
 Manage audit log
 
 - **`multimail-pp-cli audit-log list`** - Returns audit log entries with cursor pagination. Requires admin scope.
+
+### auth-md
+
+Manage auth md
+
+- **`multimail-pp-cli auth-md list`** - Returns a markdown document describing MultiMail's agent registration flow, trust ladder, and scope model. Used by agents following the auth.md protocol.
 
 ### billing
 
@@ -224,7 +280,7 @@ Manage slug check
 
 Manage support
 
-- **`multimail-pp-cli support create`** - Public endpoint. Requires a solved ALTCHA proof-of-work payload. Sends a message to the operator's support address.
+- **`multimail-pp-cli support create`** - Public endpoint. Requires a solved ALTCHA proof-of-work payload. Sends a message to support@multimail.dev.
 
 ### suppression
 
@@ -269,6 +325,8 @@ Manage well known
 
 - **`multimail-pp-cli well-known get`** - Rate-limited to 10 lookups per IP per hour.
 - **`multimail-pp-cli well-known list`** - Returns the ECDSA P-256 public key used to sign X-MultiMail-Identity headers.
+- **`multimail-pp-cli well-known list-wellknown`** - Returns OAuth authorization server metadata with an agent_auth extension block describing the auth.md agent registration flow.
+- **`multimail-pp-cli well-known list-wellknown-2`** - Returns metadata about MultiMail as an OAuth-protected resource, including supported scopes and authorization servers. Part of the auth.md agent registration protocol.
 
 
 ## Output Formats
@@ -396,6 +454,13 @@ Environment variables:
 **Not found errors (exit code 3)**
 - Check the resource ID is correct
 - Run the `list` command to see available items
+
+### API-specific
+
+- **401 Unauthorized on every command** — Check that MULTIMAIL_BEARER_AUTH is set. Get a key via `multimail-pp-cli auth register`.
+- **Emails not sending (stuck in pending)** — Mailbox is in gated_send or gated_all mode. Check `oversight pending` and approve, or add the recipient to the allowlist.
+- **Search returns no results** — Run `multimail-pp-cli sync --full` first to populate the local cache.
+- **Allowlist add returns 'approval required'** — This is the two-step OTP flow. Check operator email for the approval code, then rerun with --approval-code.
 
 ---
 

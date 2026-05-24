@@ -9,8 +9,9 @@ import (
 
 func newOperatorCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "operator",
-		Short: "Manage operator",
+		Use:    "operator",
+		Short:  "Manage operator",
+		Hidden: true,
 	}
 
 	cmd.AddCommand(newOperatorCreateCmd(flags))

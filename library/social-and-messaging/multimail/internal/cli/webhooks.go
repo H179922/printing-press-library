@@ -9,8 +9,9 @@ import (
 
 func newWebhooksCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "webhooks",
-		Short: "Manage webhooks",
+		Use:    "webhooks",
+		Short:  "Manage webhooks",
+		Hidden: true,
 	}
 
 	cmd.AddCommand(newWebhooksCreateCmd(flags))

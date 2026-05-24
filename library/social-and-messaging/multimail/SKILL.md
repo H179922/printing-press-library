@@ -1,6 +1,6 @@
 ---
 name: pp-multimail
-description: "Printing Press CLI for Multimail. Email-as-a-Service for AI agents. Inbound email converted to markdown, outbound markdown converted to HTML. Built on..."
+description: "Every MultiMail feature, plus cross-mailbox search, oversight analytics, and trust ladder tracking no other tool has. Trigger phrases: `check my multimail inbox`, `send email via multimail`, `search emails across mailboxes`, `check oversight approval queue`, `add recipient to allowlist`, `register agent with multimail`, `check trust ladder status`."
 author: "H179922"
 license: "Apache-2.0"
 argument-hint: "<command> [args] | install cli|mcp"
@@ -12,7 +12,7 @@ metadata:
         - multimail-pp-cli
 ---
 
-# Multimail — Printing Press CLI
+# MultiMail — Printing Press CLI
 
 ## Prerequisites: Install the CLI
 
@@ -25,15 +25,65 @@ This skill drives the `multimail-pp-cli` binary. **You must verify the CLI is in
 2. Verify: `multimail-pp-cli --version`
 3. Ensure `$GOPATH/bin` (or `$HOME/go/bin`) is on `$PATH`.
 
-If the `npx` install fails (no Node, offline, etc.), fall back to a direct Go install (requires Go 1.26.3 or newer):
-
-```bash
-go install github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/cmd/multimail-pp-cli@latest
-```
+If the `npx` install fails before this CLI has a public-library category, install Node or use the category-specific Go fallback after publish.
 
 If `--version` reports "command not found" after install, the install step did not put the binary on `$PATH`. Do not proceed with skill commands until verification succeeds.
 
-Email-as-a-Service for AI agents. Inbound email converted to markdown, outbound markdown converted to HTML. Built on Cloudflare Workers.
+Full CLI access to MultiMail's agent email platform. Manage mailboxes, send and read emails, configure oversight modes, and manage sending allowlists. Local SQLite cache with FTS5 search enables cross-mailbox queries, oversight velocity tracking, and trust progression analysis that the API alone cannot provide.
+
+## When to Use This CLI
+
+Use this CLI when you need shell-level access to MultiMail — in CI/CD pipelines, Docker containers, SSH sessions, or agentic shells where MCP is unavailable. The local SQLite cache and FTS5 search make it the right choice for cross-mailbox queries, oversight analytics, and trust progression tracking that the per-mailbox API cannot provide.
+
+## Unique Capabilities
+
+These capabilities aren't available in any other tool for this API.
+
+### Local state that compounds
+- **`search`** — Full-text search across all synced mailboxes at once — find any email regardless of which mailbox received it.
+
+  _When an agent needs to find a specific email and doesn't know which mailbox has it, one search beats iterating._
+
+  ```bash
+  multimail-pp-cli search 'invoice Q2' --json --select subject,from,mailbox
+  ```
+- **`mailboxes allowlist coverage`** — See what percentage of recent recipients are covered by allowlist patterns vs gated.
+
+  _Before adding allowlist entries, an agent should know which recipients are already covered and which cause the most gating friction._
+
+  ```bash
+  multimail-pp-cli mailboxes allowlist coverage --mailbox primary --days 30 --json
+  ```
+- **`inbox health`** — Per-mailbox health snapshot: unread count, oldest unread age, reply rate, and thread depth.
+
+  _An agent monitoring its own inbox health can detect when it's falling behind on replies before the operator notices._
+
+  ```bash
+  multimail-pp-cli inbox health --json
+  ```
+- **`mailboxes threads stale`** — List conversation threads with no reply in N days — surfaces dropped conversations.
+
+  _A dropped conversation thread is a customer-facing failure; this is the agent's early warning system._
+
+  ```bash
+  multimail-pp-cli mailboxes threads stale --days 3 --json
+  ```
+
+### Agent-native plumbing
+- **`oversight velocity`** — See approval/rejection rates and median decision latency per mailbox across your entire fleet.
+
+  _When an agent's sends are stuck in approval queues, this pinpoints which mailbox's operator is the bottleneck._
+
+  ```bash
+  multimail-pp-cli oversight velocity --json --days 7
+  ```
+- **`trust status`** — Fleet-wide view of each mailbox's oversight mode, time-at-level, and upgrade history.
+
+  _Before requesting a trust upgrade, an agent should know which mailboxes are ready and which have been at their current level longest._
+
+  ```bash
+  multimail-pp-cli trust status --json
+  ```
 
 ## Command Reference
 
@@ -50,6 +100,12 @@ Email-as-a-Service for AI agents. Inbound email converted to markdown, outbound 
 
 - `multimail-pp-cli admin` — Admin-only. Creates a new API key and emails it to the tenant's oversight email. Used when welcome email failed or...
 
+**agent** — Manage agent
+
+- `multimail-pp-cli agent create` — Initiates agent registration using verified_email identity assertion. Sends a 6-digit OTP to the provided email and...
+- `multimail-pp-cli agent create-auth` — Completes the auth.md registration by validating the claim_token and OTP. On success, atomically creates the tenant...
+- `multimail-pp-cli agent list` — Human-facing page that displays the 6-digit OTP for agent registration. Linked from the verification email.
+
 **api-keys** — Manage api keys
 
 - `multimail-pp-cli api-keys create` — Requires admin scope. The raw key is returned only once in the response.
@@ -65,6 +121,10 @@ Email-as-a-Service for AI agents. Inbound email converted to markdown, outbound 
 **audit-log** — Manage audit log
 
 - `multimail-pp-cli audit-log` — Returns audit log entries with cursor pagination. Requires admin scope.
+
+**auth-md** — Manage auth md
+
+- `multimail-pp-cli auth-md` — Returns a markdown document describing MultiMail's agent registration flow, trust ladder, and scope model. Used by...
 
 **billing** — Manage billing
 
@@ -137,7 +197,7 @@ Email-as-a-Service for AI agents. Inbound email converted to markdown, outbound 
 
 **support** — Manage support
 
-- `multimail-pp-cli support` — Public endpoint. Requires a solved ALTCHA proof-of-work payload. Sends a message to the operator's support address.
+- `multimail-pp-cli support` — Public endpoint. Requires a solved ALTCHA proof-of-work payload. Sends a message to support@multimail.dev.
 
 **suppression** — Manage suppression
 
@@ -170,6 +230,8 @@ Email-as-a-Service for AI agents. Inbound email converted to markdown, outbound 
 
 - `multimail-pp-cli well-known get` — Rate-limited to 10 lookups per IP per hour.
 - `multimail-pp-cli well-known list` — Returns the ECDSA P-256 public key used to sign X-MultiMail-Identity headers.
+- `multimail-pp-cli well-known list-wellknown` — Returns OAuth authorization server metadata with an agent_auth extension block describing the auth.md agent...
+- `multimail-pp-cli well-known list-wellknown-2` — Returns metadata about MultiMail as an OAuth-protected resource, including supported scopes and authorization...
 
 
 ### Finding the right command
@@ -182,9 +244,52 @@ multimail-pp-cli which "<capability in your own words>"
 
 `which` resolves a natural-language capability query to the best matching command from this CLI's curated feature index. Exit code `0` means at least one match; exit code `2` means no confident match — fall back to `--help` or use a narrower query.
 
+## Recipes
+
+
+### Morning inbox triage
+
+```bash
+multimail-pp-cli inbox health --json --select mailbox,unread,oldest_unread_age
+```
+
+Check inbox health across all mailboxes to prioritize which needs attention first.
+
+### Find a conversation across mailboxes
+
+```bash
+multimail-pp-cli search 'quarterly report' --json --select subject,from,mailbox,date
+```
+
+Full-text search all synced mailboxes — no need to know which mailbox has the email.
+
+### Check oversight bottlenecks
+
+```bash
+multimail-pp-cli oversight velocity --days 7 --json --select mailbox,approval_rate,median_latency
+```
+
+See which mailboxes have slow approval rates so you can address operator bottlenecks.
+
+### Allowlist gap analysis
+
+```bash
+multimail-pp-cli mailboxes allowlist coverage --mailbox primary --days 30 --json
+```
+
+See what percentage of recent sends were covered by allowlist patterns vs gated.
+
+### Detect dropped conversations
+
+```bash
+multimail-pp-cli mailboxes threads stale --days 5 --json --select subject,last_activity,mailbox
+```
+
+Find threads with no reply in 5 days — each is a potential customer-facing failure.
+
 ## Auth Setup
 
-Store your access token:
+Run `multimail-pp-cli auth setup` for the URL and steps to obtain a token (add `--launch` to open the URL). Then store it:
 
 ```bash
 multimail-pp-cli auth set-token YOUR_TOKEN_HERE

@@ -9,8 +9,9 @@ import (
 
 func newBillingCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "billing",
-		Short: "Manage billing",
+		Use:    "billing",
+		Short:  "Manage billing",
+		Hidden: true,
 	}
 
 	cmd.AddCommand(newBillingCreateCmd(flags))

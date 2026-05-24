@@ -11,15 +11,14 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"multimail-pp-cli/internal/cliutil"
+	"multimail-pp-cli/internal/config"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/cliutil"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/config"
 )
 
 type Client struct {
@@ -31,8 +30,6 @@ type Client struct {
 	cacheDir   string
 	limiter    *cliutil.AdaptiveLimiter
 }
-
-
 
 // APIError carries HTTP status information for structured exit codes.
 type APIError struct {
@@ -92,15 +89,25 @@ func (c *Client) ProbeGet(path string) (int, error) {
 }
 
 func (c *Client) cacheKey(path string, params map[string]string) string {
-	// Sort keys for deterministic cache key
-	keys := make([]string, 0, len(params))
-	for k := range params {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
 	key := path
-	for _, k := range keys {
-		key += "\x00" + k + "=" + params[k]
+	key += "|base_url=" + c.BaseURL
+	if c.Config != nil {
+		key += "|auth_source=" + c.Config.AuthSource
+		if authHeader := c.Config.AuthHeader(); authHeader != "" {
+			authHash := sha256.Sum256([]byte(c.Config.AuthHeader()))
+			key += "|auth=" + hex.EncodeToString(authHash[:8])
+		}
+		if c.Config.Path != "" {
+			key += "|config_path=" + c.Config.Path
+		}
+	}
+	paramKeys := make([]string, 0, len(params))
+	for k := range params {
+		paramKeys = append(paramKeys, k)
+	}
+	sort.Strings(paramKeys)
+	for _, k := range paramKeys {
+		key += k + "=" + params[k]
 	}
 	h := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(h[:8])
@@ -239,6 +246,14 @@ func (c *Client) do(method, path string, params map[string]string, body any, hea
 		if req.Header.Get("User-Agent") == "" {
 			req.Header.Set("User-Agent", "multimail-pp-cli/2.0.0")
 		}
+		// Go's net/http omits Accept by default; browsers, curl, and other
+		// stdlibs always send it. Fingerprint-checking WAFs (Imperva, Akamai,
+		// Cloudflare bot-mode, DataDome) flag the absence as a bot signal
+		// and answer with empty-body 5xx, 403, or a challenge redirect
+		// depending on vendor and rule tier.
+		if req.Header.Get("Accept") == "" {
+			req.Header.Set("Accept", "*/*")
+		}
 
 		resp, err := c.HTTPClient.Do(req)
 		if err != nil {
@@ -358,60 +373,6 @@ func (c *Client) refreshAccessToken() error {
 	if c.Config == nil {
 		return nil
 	}
-	if c.Config.RefreshToken == "" {
-		return nil
-	}
-
-	tokenURL := ""
-	if tokenURL == "" {
-		return nil
-	}
-
-	params := url.Values{
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {c.Config.RefreshToken},
-		"client_id":     {c.Config.ClientID},
-	}
-	if c.Config.ClientSecret != "" {
-		params.Set("client_secret", c.Config.ClientSecret)
-	}
-
-	resp, err := c.HTTPClient.PostForm(tokenURL, params)
-	if err != nil {
-		return fmt.Errorf("refreshing access token: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("refreshing access token: HTTP %d: %s", resp.StatusCode, truncateBody(body))
-	}
-
-	var tokenResp struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		ExpiresIn    int    `json:"expires_in"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return fmt.Errorf("parsing refresh response: %w", err)
-	}
-	if tokenResp.AccessToken == "" {
-		return fmt.Errorf("refreshing access token: no access token in response")
-	}
-
-	refreshToken := c.Config.RefreshToken
-	if tokenResp.RefreshToken != "" {
-		refreshToken = tokenResp.RefreshToken
-	}
-
-	expiry := time.Time{}
-	if tokenResp.ExpiresIn > 0 {
-		expiry = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
-	}
-
-	if err := c.Config.SaveTokens(c.Config.ClientID, c.Config.ClientSecret, tokenResp.AccessToken, refreshToken, expiry); err != nil {
-		return fmt.Errorf("saving refreshed token: %w", err)
-	}
 
 	return nil
 }
@@ -440,7 +401,6 @@ func sanitizeJSONResponse(body []byte) []byte {
 	}
 	return body
 }
-
 
 // maskToken redacts all but the last 4 characters of a token for safe display.
 func maskToken(token string) string {

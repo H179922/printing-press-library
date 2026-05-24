@@ -9,8 +9,9 @@ import (
 
 func newApiKeysCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "api-keys",
-		Short: "Manage api keys",
+		Use:    "api-keys",
+		Short:  "Manage api keys",
+		Hidden: true,
 	}
 
 	cmd.AddCommand(newApiKeysCreateCmd(flags))

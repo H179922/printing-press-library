@@ -5,7 +5,9 @@ package cli
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -13,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/client"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/store"
+	"multimail-pp-cli/internal/client"
+	"multimail-pp-cli/internal/store"
 )
 
 // isNetworkError returns true for errors caused by network connectivity issues
@@ -253,10 +255,10 @@ func resolveLocal(ctx context.Context, resourceType string, isList bool, path st
 
 	item, err := db.Get(resourceType, id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, DataProvenance{}, fmt.Errorf("resource %q with ID %q not found in local store. Run 'multimail-pp-cli sync' first", resourceType, id)
+		}
 		return nil, DataProvenance{}, fmt.Errorf("querying local store: %w", err)
-	}
-	if item == nil {
-		return nil, DataProvenance{}, fmt.Errorf("resource %q with ID %q not found in local store. Run 'multimail-pp-cli sync' first", resourceType, id)
 	}
 	return item, prov, nil
 }

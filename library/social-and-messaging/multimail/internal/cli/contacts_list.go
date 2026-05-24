@@ -15,9 +15,9 @@ func newContactsListCmd(flags *rootFlags) *cobra.Command {
 	var flagQ string
 
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "Search address book by name or email. Omit query to list all. Requires read scope.",
-		Example: "  multimail-pp-cli contacts list",
+		Use:         "list",
+		Short:       "Search address book by name or email. Omit query to list all. Requires read scope.",
+		Example:     "  multimail-pp-cli contacts list",
 		Annotations: map[string]string{"pp:endpoint": "contacts.list", "pp:method": "GET", "pp:path": "/v1/contacts", "mcp:read-only": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := flags.newClient()
@@ -42,8 +42,10 @@ func newContactsListCmd(flags *rootFlags) *cobra.Command {
 			}
 			// For JSON output, wrap with provenance envelope before passing through flags.
 			// --select wins over --compact when both are set; --compact only runs when
-			// no explicit fields were requested.
-			if flags.asJSON || !isTerminal(cmd.OutOrStdout()) {
+			// no explicit fields were requested. Explicit format flags (--csv, --quiet,
+			// --plain) opt out of the auto-JSON path so piped consumers that asked for
+			// a non-JSON format reach the standard pipeline below.
+			if flags.asJSON || (!isTerminal(cmd.OutOrStdout()) && !flags.csv && !flags.quiet && !flags.plain) {
 				filtered := data
 				if flags.selectFields != "" {
 					filtered = filterFields(filtered, flags.selectFields)

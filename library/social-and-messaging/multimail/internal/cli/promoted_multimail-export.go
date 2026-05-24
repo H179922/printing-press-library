@@ -14,10 +14,10 @@ import (
 func newMultimailExportPromotedCmd(flags *rootFlags) *cobra.Command {
 
 	cmd := &cobra.Command{
-		Use:   "multimail-export",
-		Short: "Requires admin scope. Rate limited to 1 request per hour.",
-		Long:  "Shortcut for 'multimail-export list'. Requires admin scope. Rate limited to 1 request per hour.",
-		Example: "  multimail-pp-cli multimail-export",
+		Use:         "multimail-export",
+		Short:       "Requires admin scope. Rate limited to 1 request per hour.",
+		Long:        "Shortcut for 'multimail-export list'. Requires admin scope. Rate limited to 1 request per hour.",
+		Example:     "  multimail-pp-cli multimail-export",
 		Annotations: map[string]string{"pp:endpoint": "multimail-export.list", "pp:method": "GET", "pp:path": "/v1/export", "mcp:read-only": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := flags.newClient()
@@ -44,14 +44,12 @@ func newMultimailExportPromotedCmd(flags *rootFlags) *cobra.Command {
 				}
 				printProvenance(cmd, len(countItems), prov)
 			}
-			// CSV bypasses JSON pipe path so --csv works when piped
-			if flags.csv {
-				return printOutputWithFlags(cmd.OutOrStdout(), data, flags)
-			}
 			// For JSON output, wrap with provenance envelope. --select wins over
 			// --compact when both are set; --compact only runs when no explicit
-			// fields were requested.
-			if flags.asJSON || !isTerminal(cmd.OutOrStdout()) {
+			// fields were requested. Explicit format flags (--csv, --quiet, --plain)
+			// opt out of the auto-JSON path so piped consumers that asked for a
+			// non-JSON format reach the standard pipeline below.
+			if flags.asJSON || (!isTerminal(cmd.OutOrStdout()) && !flags.csv && !flags.quiet && !flags.plain) {
 				filtered := data
 				if flags.selectFields != "" {
 					filtered = filterFields(filtered, flags.selectFields)

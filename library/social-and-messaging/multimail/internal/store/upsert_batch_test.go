@@ -342,6 +342,48 @@ func TestUpsertBatch_PopulatesAdminTable(t *testing.T) {
 	}
 }
 
+// TestUpsertBatch_PopulatesAgentTable verifies that UpsertBatch
+// dispatches paginated items into both the generic resources table AND the
+// typed agent table. Regression for issue #268: before the fix, paginated
+// syncs only filled the generic resources table, so domain commands that
+// query the typed table saw zero rows.
+func TestUpsertBatch_PopulatesAgentTable(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data.db")
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+
+	items := []json.RawMessage{
+		json.RawMessage(`{"id": "test-001"}`),
+		json.RawMessage(`{"id": "test-002"}`),
+		json.RawMessage(`{"id": "test-003"}`),
+	}
+	if _, _, err := s.UpsertBatch("agent", items); err != nil {
+		t.Fatalf("UpsertBatch: %v", err)
+	}
+
+	db := s.DB()
+
+	var generic int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM resources WHERE resource_type = ?`, "agent").Scan(&generic); err != nil {
+		t.Fatalf("count resources: %v", err)
+	}
+	if generic != len(items) {
+		t.Fatalf("resources count = %d, want %d", generic, len(items))
+	}
+
+	var typed int
+	typedQuery := fmt.Sprintf(`SELECT COUNT(*) FROM "%s"`, "agent")
+	if err := db.QueryRow(typedQuery).Scan(&typed); err != nil {
+		t.Fatalf("count agent: %v", err)
+	}
+	if typed != len(items) {
+		t.Fatalf("agent count = %d, want %d (typed table not populated by UpsertBatch)", typed, len(items))
+	}
+}
+
 // TestUpsertBatch_PopulatesBillingTable verifies that UpsertBatch
 // dispatches paginated items into both the generic resources table AND the
 // typed billing table. Regression for issue #268: before the fix, paginated
@@ -440,9 +482,9 @@ func TestUpsertBatch_PopulatesVerifyTable(t *testing.T) {
 	defer s.Close()
 
 	items := []json.RawMessage{
-		json.RawMessage(`{"id": "test-001", "domains_id": "dom-001"}`),
-		json.RawMessage(`{"id": "test-002", "domains_id": "dom-002"}`),
-		json.RawMessage(`{"id": "test-003", "domains_id": "dom-003"}`),
+		json.RawMessage(`{"id": "test-001"}`),
+		json.RawMessage(`{"id": "test-002"}`),
+		json.RawMessage(`{"id": "test-003"}`),
 	}
 	if _, _, err := s.UpsertBatch("verify", items); err != nil {
 		t.Fatalf("UpsertBatch: %v", err)
@@ -482,9 +524,9 @@ func TestUpsertBatch_PopulatesNotSpamTable(t *testing.T) {
 	defer s.Close()
 
 	items := []json.RawMessage{
-		json.RawMessage(`{"id": "test-001", "emails_id": "email-001"}`),
-		json.RawMessage(`{"id": "test-002", "emails_id": "email-002"}`),
-		json.RawMessage(`{"id": "test-003", "emails_id": "email-003"}`),
+		json.RawMessage(`{"id": "test-001"}`),
+		json.RawMessage(`{"id": "test-002"}`),
+		json.RawMessage(`{"id": "test-003"}`),
 	}
 	if _, _, err := s.UpsertBatch("not_spam", items); err != nil {
 		t.Fatalf("UpsertBatch: %v", err)
@@ -524,9 +566,9 @@ func TestUpsertBatch_PopulatesReportSpamTable(t *testing.T) {
 	defer s.Close()
 
 	items := []json.RawMessage{
-		json.RawMessage(`{"id": "test-001", "emails_id": "email-001"}`),
-		json.RawMessage(`{"id": "test-002", "emails_id": "email-002"}`),
-		json.RawMessage(`{"id": "test-003", "emails_id": "email-003"}`),
+		json.RawMessage(`{"id": "test-001"}`),
+		json.RawMessage(`{"id": "test-002"}`),
+		json.RawMessage(`{"id": "test-003"}`),
 	}
 	if _, _, err := s.UpsertBatch("report_spam", items); err != nil {
 		t.Fatalf("UpsertBatch: %v", err)
@@ -552,6 +594,48 @@ func TestUpsertBatch_PopulatesReportSpamTable(t *testing.T) {
 	}
 }
 
+// TestUpsertBatch_PopulatesAllowlistTable verifies that UpsertBatch
+// dispatches paginated items into both the generic resources table AND the
+// typed allowlist table. Regression for issue #268: before the fix, paginated
+// syncs only filled the generic resources table, so domain commands that
+// query the typed table saw zero rows.
+func TestUpsertBatch_PopulatesAllowlistTable(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data.db")
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+
+	items := []json.RawMessage{
+		json.RawMessage(`{"id": "test-001"}`),
+		json.RawMessage(`{"id": "test-002"}`),
+		json.RawMessage(`{"id": "test-003"}`),
+	}
+	if _, _, err := s.UpsertBatch("allowlist", items); err != nil {
+		t.Fatalf("UpsertBatch: %v", err)
+	}
+
+	db := s.DB()
+
+	var generic int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM resources WHERE resource_type = ?`, "allowlist").Scan(&generic); err != nil {
+		t.Fatalf("count resources: %v", err)
+	}
+	if generic != len(items) {
+		t.Fatalf("resources count = %d, want %d", generic, len(items))
+	}
+
+	var typed int
+	typedQuery := fmt.Sprintf(`SELECT COUNT(*) FROM "%s"`, "allowlist")
+	if err := db.QueryRow(typedQuery).Scan(&typed); err != nil {
+		t.Fatalf("count allowlist: %v", err)
+	}
+	if typed != len(items) {
+		t.Fatalf("allowlist count = %d, want %d (typed table not populated by UpsertBatch)", typed, len(items))
+	}
+}
+
 // TestUpsertBatch_PopulatesMailboxesEmailsTable verifies that UpsertBatch
 // dispatches paginated items into both the generic resources table AND the
 // typed mailboxes_emails table. Regression for issue #268: before the fix, paginated
@@ -566,9 +650,9 @@ func TestUpsertBatch_PopulatesMailboxesEmailsTable(t *testing.T) {
 	defer s.Close()
 
 	items := []json.RawMessage{
-		json.RawMessage(`{"id": "test-001", "mailboxes_id": "mbx-001"}`),
-		json.RawMessage(`{"id": "test-002", "mailboxes_id": "mbx-002"}`),
-		json.RawMessage(`{"id": "test-003", "mailboxes_id": "mbx-003"}`),
+		json.RawMessage(`{"id": "test-001"}`),
+		json.RawMessage(`{"id": "test-002"}`),
+		json.RawMessage(`{"id": "test-003"}`),
 	}
 	if _, _, err := s.UpsertBatch("mailboxes_emails", items); err != nil {
 		t.Fatalf("UpsertBatch: %v", err)
@@ -606,9 +690,9 @@ func TestUpsertBatch_SetsMailboxesEmailsParentID(t *testing.T) {
 	defer s.Close()
 
 	items := []json.RawMessage{
-		json.RawMessage(`{"id": "child-001", "mailboxes_id": "mbx-001", "parent_id": "parent-A"}`),
-		json.RawMessage(`{"id": "child-002", "mailboxes_id": "mbx-001", "parent_id": "parent-A"}`),
-		json.RawMessage(`{"id": "child-003", "mailboxes_id": "mbx-002", "parent_id": "parent-B"}`),
+		json.RawMessage(`{"id": "child-001", "parent_id": "parent-A"}`),
+		json.RawMessage(`{"id": "child-002", "parent_id": "parent-A"}`),
+		json.RawMessage(`{"id": "child-003", "parent_id": "parent-B"}`),
 	}
 	if _, _, err := s.UpsertBatch("mailboxes_emails", items); err != nil {
 		t.Fatalf("UpsertBatch: %v", err)
@@ -640,9 +724,9 @@ func TestUpsertBatch_PopulatesReplyTable(t *testing.T) {
 	defer s.Close()
 
 	items := []json.RawMessage{
-		json.RawMessage(`{"id": "test-001", "mailboxes_id": "mbx-001"}`),
-		json.RawMessage(`{"id": "test-002", "mailboxes_id": "mbx-002"}`),
-		json.RawMessage(`{"id": "test-003", "mailboxes_id": "mbx-003"}`),
+		json.RawMessage(`{"id": "test-001"}`),
+		json.RawMessage(`{"id": "test-002"}`),
+		json.RawMessage(`{"id": "test-003"}`),
 	}
 	if _, _, err := s.UpsertBatch("reply", items); err != nil {
 		t.Fatalf("UpsertBatch: %v", err)
@@ -682,9 +766,9 @@ func TestUpsertBatch_PopulatesRequestUpgradeTable(t *testing.T) {
 	defer s.Close()
 
 	items := []json.RawMessage{
-		json.RawMessage(`{"id": "test-001", "mailboxes_id": "mbx-001"}`),
-		json.RawMessage(`{"id": "test-002", "mailboxes_id": "mbx-002"}`),
-		json.RawMessage(`{"id": "test-003", "mailboxes_id": "mbx-003"}`),
+		json.RawMessage(`{"id": "test-001"}`),
+		json.RawMessage(`{"id": "test-002"}`),
+		json.RawMessage(`{"id": "test-003"}`),
 	}
 	if _, _, err := s.UpsertBatch("request_upgrade", items); err != nil {
 		t.Fatalf("UpsertBatch: %v", err)
@@ -724,9 +808,9 @@ func TestUpsertBatch_PopulatesSendTable(t *testing.T) {
 	defer s.Close()
 
 	items := []json.RawMessage{
-		json.RawMessage(`{"id": "test-001", "mailboxes_id": "mbx-001"}`),
-		json.RawMessage(`{"id": "test-002", "mailboxes_id": "mbx-002"}`),
-		json.RawMessage(`{"id": "test-003", "mailboxes_id": "mbx-003"}`),
+		json.RawMessage(`{"id": "test-001"}`),
+		json.RawMessage(`{"id": "test-002"}`),
+		json.RawMessage(`{"id": "test-003"}`),
 	}
 	if _, _, err := s.UpsertBatch("send", items); err != nil {
 		t.Fatalf("UpsertBatch: %v", err)
@@ -766,9 +850,9 @@ func TestUpsertBatch_PopulatesThreadsTable(t *testing.T) {
 	defer s.Close()
 
 	items := []json.RawMessage{
-		json.RawMessage(`{"id": "test-001", "mailboxes_id": "mbx-001"}`),
-		json.RawMessage(`{"id": "test-002", "mailboxes_id": "mbx-002"}`),
-		json.RawMessage(`{"id": "test-003", "mailboxes_id": "mbx-003"}`),
+		json.RawMessage(`{"id": "test-001"}`),
+		json.RawMessage(`{"id": "test-002"}`),
+		json.RawMessage(`{"id": "test-003"}`),
 	}
 	if _, _, err := s.UpsertBatch("threads", items); err != nil {
 		t.Fatalf("UpsertBatch: %v", err)
@@ -808,9 +892,9 @@ func TestUpsertBatch_PopulatesUpgradeTable(t *testing.T) {
 	defer s.Close()
 
 	items := []json.RawMessage{
-		json.RawMessage(`{"id": "test-001", "mailboxes_id": "mbx-001"}`),
-		json.RawMessage(`{"id": "test-002", "mailboxes_id": "mbx-002"}`),
-		json.RawMessage(`{"id": "test-003", "mailboxes_id": "mbx-003"}`),
+		json.RawMessage(`{"id": "test-001"}`),
+		json.RawMessage(`{"id": "test-002"}`),
+		json.RawMessage(`{"id": "test-003"}`),
 	}
 	if _, _, err := s.UpsertBatch("upgrade", items); err != nil {
 		t.Fatalf("UpsertBatch: %v", err)
@@ -896,14 +980,14 @@ func TestUpsertBatch_PopulatesSlugCheckTable(t *testing.T) {
 		json.RawMessage(`{"id": "test-002"}`),
 		json.RawMessage(`{"id": "test-003"}`),
 	}
-	if _, _, err := s.UpsertBatch("slug_check", items); err != nil {
+	if _, _, err := s.UpsertBatch("slug-check", items); err != nil {
 		t.Fatalf("UpsertBatch: %v", err)
 	}
 
 	db := s.DB()
 
 	var generic int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM resources WHERE resource_type = ?`, "slug_check").Scan(&generic); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM resources WHERE resource_type = ?`, "slug-check").Scan(&generic); err != nil {
 		t.Fatalf("count resources: %v", err)
 	}
 	if generic != len(items) {
@@ -959,5 +1043,47 @@ func TestUpsertBatch_PopulatesWebhooksTable(t *testing.T) {
 	}
 	if typed != len(items) {
 		t.Fatalf("webhooks count = %d, want %d (typed table not populated by UpsertBatch)", typed, len(items))
+	}
+}
+
+// TestUpsertBatch_PopulatesWellKnownTable verifies that UpsertBatch
+// dispatches paginated items into both the generic resources table AND the
+// typed well_known table. Regression for issue #268: before the fix, paginated
+// syncs only filled the generic resources table, so domain commands that
+// query the typed table saw zero rows.
+func TestUpsertBatch_PopulatesWellKnownTable(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data.db")
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+
+	items := []json.RawMessage{
+		json.RawMessage(`{"id": "test-001"}`),
+		json.RawMessage(`{"id": "test-002"}`),
+		json.RawMessage(`{"id": "test-003"}`),
+	}
+	if _, _, err := s.UpsertBatch("well-known", items); err != nil {
+		t.Fatalf("UpsertBatch: %v", err)
+	}
+
+	db := s.DB()
+
+	var generic int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM resources WHERE resource_type = ?`, "well-known").Scan(&generic); err != nil {
+		t.Fatalf("count resources: %v", err)
+	}
+	if generic != len(items) {
+		t.Fatalf("resources count = %d, want %d", generic, len(items))
+	}
+
+	var typed int
+	typedQuery := fmt.Sprintf(`SELECT COUNT(*) FROM "%s"`, "well_known")
+	if err := db.QueryRow(typedQuery).Scan(&typed); err != nil {
+		t.Fatalf("count well_known: %v", err)
+	}
+	if typed != len(items) {
+		t.Fatalf("well_known count = %d, want %d (typed table not populated by UpsertBatch)", typed, len(items))
 	}
 }

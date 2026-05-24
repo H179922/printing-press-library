@@ -5,7 +5,6 @@ package cli
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -13,33 +12,33 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/client"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/config"
 	"github.com/spf13/cobra"
+	"multimail-pp-cli/internal/client"
+	"multimail-pp-cli/internal/config"
 )
 
 var version = "1.0.0"
 
 type rootFlags struct {
-	asJSON       bool
-	compact      bool
-	csv          bool
-	plain        bool
-	quiet        bool
-	dryRun       bool
-	noCache      bool
-	noInput      bool
-	idempotent   bool
+	asJSON        bool
+	compact       bool
+	csv           bool
+	plain         bool
+	quiet         bool
+	dryRun        bool
+	noCache       bool
+	noInput       bool
+	idempotent    bool
 	ignoreMissing bool
-	yes          bool
-	agent        bool
-	selectFields string
-	configPath   string
-	profileName  string
-	deliverSpec  string
-	timeout      time.Duration
-	rateLimit    float64
-	dataSource   string
+	yes           bool
+	agent         bool
+	selectFields  string
+	configPath    string
+	profileName   string
+	deliverSpec   string
+	timeout       time.Duration
+	rateLimit     float64
+	dataSource    string
 	freshnessMeta any
 
 	// deliverBuf captures command output when --deliver is set to a
@@ -83,11 +82,20 @@ func Execute() error {
 func newRootCmd(flags *rootFlags) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "multimail-pp-cli",
-		Short: "Manage multimail resources via the multimail API",
-		Long: `Manage multimail resources via the multimail API.
+		Short: `Multimail CLI — Every MultiMail feature, plus cross-mailbox search, oversight analytics, and trust ladder tracking no other tool has.`,
+		Long: `Multimail CLI — Every MultiMail feature, plus cross-mailbox search, oversight analytics, and trust ladder tracking no other tool has.
 
-Add --agent to any command for JSON output + non-interactive mode.
-Run 'multimail-pp-cli doctor' to verify auth and connectivity.`,
+Highlights (not in the official API docs):
+  • search   Full-text search across all synced mailboxes at once — find any email regardless of which mailbox received it.
+  • oversight velocity   See approval/rejection rates and median decision latency per mailbox across your entire fleet.
+  • trust status   Fleet-wide view of each mailbox's oversight mode, time-at-level, and upgrade history.
+  • mailboxes allowlist coverage   See what percentage of recent recipients are covered by allowlist patterns vs gated.
+  • inbox health   Per-mailbox health snapshot: unread count, oldest unread age, reply rate, and thread depth.
+  • mailboxes threads stale   List conversation threads with no reply in N days — surfaces dropped conversations.
+
+Agent mode: add --agent to any command for JSON output + non-interactive mode.
+Health check: run 'multimail-pp-cli doctor' to verify auth and connectivity.
+See README.md or the bundled SKILL.md for recipes.`,
 		SilenceUsage: true,
 		Version:      version,
 	}
@@ -169,6 +177,7 @@ Run 'multimail-pp-cli doctor' to verify auth and connectivity.`,
 		return nil
 	}
 	rootCmd.AddCommand(newAccountCmd(flags))
+	rootCmd.AddCommand(newAgentCmd(flags))
 	rootCmd.AddCommand(newApiKeysCmd(flags))
 	rootCmd.AddCommand(newApproveCmd(flags))
 	rootCmd.AddCommand(newBillingCmd(flags))
@@ -197,6 +206,7 @@ Run 'multimail-pp-cli doctor' to verify auth and connectivity.`,
 	rootCmd.AddCommand(newAPICmd(flags))
 	rootCmd.AddCommand(newAdminPromotedCmd(flags))
 	rootCmd.AddCommand(newAuditLogPromotedCmd(flags))
+	rootCmd.AddCommand(newAuthMdPromotedCmd(flags))
 	rootCmd.AddCommand(newEmailsPromotedCmd(flags))
 	rootCmd.AddCommand(newFunnelPromotedCmd(flags))
 	rootCmd.AddCommand(newMultimailExportPromotedCmd(flags))
@@ -205,6 +215,8 @@ Run 'multimail-pp-cli doctor' to verify auth and connectivity.`,
 	rootCmd.AddCommand(newSupportPromotedCmd(flags))
 	rootCmd.AddCommand(newUsagePromotedCmd(flags))
 	rootCmd.AddCommand(newWebhookDeliveriesPromotedCmd(flags))
+	rootCmd.AddCommand(newTrustCmd(flags))
+	rootCmd.AddCommand(newInboxCmd(flags))
 	rootCmd.AddCommand(newVersionCliCmd())
 
 	return rootCmd
@@ -230,9 +242,7 @@ func (f *rootFlags) newClient() (*client.Client, error) {
 }
 
 func (f *rootFlags) printJSON(w *cobra.Command, v any) error {
-	enc := json.NewEncoder(w.OutOrStdout())
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
+	return printJSONFiltered(w.OutOrStdout(), v, f)
 }
 
 func (f *rootFlags) printTable(w *cobra.Command, headers []string, rows [][]string) error {

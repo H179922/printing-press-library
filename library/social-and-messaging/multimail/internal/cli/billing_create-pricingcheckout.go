@@ -16,7 +16,28 @@ func newBillingCreatePricingcheckoutCmd(flags *rootFlags) *cobra.Command {
 	var bodyAcceptedAntiSpamPolicy bool
 	var bodyAcceptedOperatorAgreement bool
 	var bodyAcceptedTos bool
-	var bodyAttribution string
+	var bodyAttributionFirstLandingPath string
+	var bodyAttributionFirstParamsFbclid string
+	var bodyAttributionFirstParamsGclid string
+	var bodyAttributionFirstParamsMsclkid string
+	var bodyAttributionFirstParamsUtmCampaign string
+	var bodyAttributionFirstParamsUtmContent string
+	var bodyAttributionFirstParamsUtmMedium string
+	var bodyAttributionFirstParamsUtmSource string
+	var bodyAttributionFirstParamsUtmTerm string
+	var bodyAttributionFirstTs int
+	var bodyAttributionLastLandingPath string
+	var bodyAttributionLastParamsFbclid string
+	var bodyAttributionLastParamsGclid string
+	var bodyAttributionLastParamsMsclkid string
+	var bodyAttributionLastParamsUtmCampaign string
+	var bodyAttributionLastParamsUtmContent string
+	var bodyAttributionLastParamsUtmMedium string
+	var bodyAttributionLastParamsUtmSource string
+	var bodyAttributionLastParamsUtmTerm string
+	var bodyAttributionLastTs int
+	var bodyAttributionVersion int
+	var bodyAttributionVisits int
 	var bodyInterval string
 	var bodyOperatorName string
 	var bodyOversightEmail string
@@ -27,9 +48,9 @@ func newBillingCreatePricingcheckoutCmd(flags *rootFlags) *cobra.Command {
 	var stdinBody bool
 
 	cmd := &cobra.Command{
-		Use:   "create-pricingcheckout",
-		Short: "Creates an inactive tenant, provisions a default mailbox, and returns a Stripe checkout URL. After payment, call GET...",
-		Example: "  multimail-pp-cli billing create-pricingcheckout --operator-name example-resource",
+		Use:         "create-pricingcheckout",
+		Short:       "Creates an inactive tenant, provisions a default mailbox, and returns a Stripe checkout URL. After payment, call GET...",
+		Example:     "  multimail-pp-cli billing create-pricingcheckout --operator-name example-resource",
 		Annotations: map[string]string{"pp:endpoint": "billing.create-pricingcheckout", "pp:method": "POST", "pp:path": "/v1/billing/pricing-checkout"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !stdinBody {
@@ -80,12 +101,101 @@ func newBillingCreatePricingcheckoutCmd(flags *rootFlags) *cobra.Command {
 				if bodyAcceptedTos != false {
 					body["accepted_tos"] = bodyAcceptedTos
 				}
-				if bodyAttribution != "" {
-					var parsedAttribution any
-					if err := json.Unmarshal([]byte(bodyAttribution), &parsedAttribution); err != nil {
-						return fmt.Errorf("parsing --attribution JSON: %w", err)
+				{
+					nestedAttribution := map[string]any{}
+					{
+						nestedAttributionFirst := map[string]any{}
+						if bodyAttributionFirstLandingPath != "" {
+							nestedAttributionFirst["landing_path"] = bodyAttributionFirstLandingPath
+						}
+						{
+							nestedAttributionFirstParams := map[string]any{}
+							if bodyAttributionFirstParamsFbclid != "" {
+								nestedAttributionFirstParams["fbclid"] = bodyAttributionFirstParamsFbclid
+							}
+							if bodyAttributionFirstParamsGclid != "" {
+								nestedAttributionFirstParams["gclid"] = bodyAttributionFirstParamsGclid
+							}
+							if bodyAttributionFirstParamsMsclkid != "" {
+								nestedAttributionFirstParams["msclkid"] = bodyAttributionFirstParamsMsclkid
+							}
+							if bodyAttributionFirstParamsUtmCampaign != "" {
+								nestedAttributionFirstParams["utm_campaign"] = bodyAttributionFirstParamsUtmCampaign
+							}
+							if bodyAttributionFirstParamsUtmContent != "" {
+								nestedAttributionFirstParams["utm_content"] = bodyAttributionFirstParamsUtmContent
+							}
+							if bodyAttributionFirstParamsUtmMedium != "" {
+								nestedAttributionFirstParams["utm_medium"] = bodyAttributionFirstParamsUtmMedium
+							}
+							if bodyAttributionFirstParamsUtmSource != "" {
+								nestedAttributionFirstParams["utm_source"] = bodyAttributionFirstParamsUtmSource
+							}
+							if bodyAttributionFirstParamsUtmTerm != "" {
+								nestedAttributionFirstParams["utm_term"] = bodyAttributionFirstParamsUtmTerm
+							}
+							if len(nestedAttributionFirstParams) > 0 {
+								nestedAttributionFirst["params"] = nestedAttributionFirstParams
+							}
+						}
+						if bodyAttributionFirstTs != 0 {
+							nestedAttributionFirst["ts"] = bodyAttributionFirstTs
+						}
+						if len(nestedAttributionFirst) > 0 {
+							nestedAttribution["first"] = nestedAttributionFirst
+						}
 					}
-					body["attribution"] = parsedAttribution
+					{
+						nestedAttributionLast := map[string]any{}
+						if bodyAttributionLastLandingPath != "" {
+							nestedAttributionLast["landing_path"] = bodyAttributionLastLandingPath
+						}
+						{
+							nestedAttributionLastParams := map[string]any{}
+							if bodyAttributionLastParamsFbclid != "" {
+								nestedAttributionLastParams["fbclid"] = bodyAttributionLastParamsFbclid
+							}
+							if bodyAttributionLastParamsGclid != "" {
+								nestedAttributionLastParams["gclid"] = bodyAttributionLastParamsGclid
+							}
+							if bodyAttributionLastParamsMsclkid != "" {
+								nestedAttributionLastParams["msclkid"] = bodyAttributionLastParamsMsclkid
+							}
+							if bodyAttributionLastParamsUtmCampaign != "" {
+								nestedAttributionLastParams["utm_campaign"] = bodyAttributionLastParamsUtmCampaign
+							}
+							if bodyAttributionLastParamsUtmContent != "" {
+								nestedAttributionLastParams["utm_content"] = bodyAttributionLastParamsUtmContent
+							}
+							if bodyAttributionLastParamsUtmMedium != "" {
+								nestedAttributionLastParams["utm_medium"] = bodyAttributionLastParamsUtmMedium
+							}
+							if bodyAttributionLastParamsUtmSource != "" {
+								nestedAttributionLastParams["utm_source"] = bodyAttributionLastParamsUtmSource
+							}
+							if bodyAttributionLastParamsUtmTerm != "" {
+								nestedAttributionLastParams["utm_term"] = bodyAttributionLastParamsUtmTerm
+							}
+							if len(nestedAttributionLastParams) > 0 {
+								nestedAttributionLast["params"] = nestedAttributionLastParams
+							}
+						}
+						if bodyAttributionLastTs != 0 {
+							nestedAttributionLast["ts"] = bodyAttributionLastTs
+						}
+						if len(nestedAttributionLast) > 0 {
+							nestedAttribution["last"] = nestedAttributionLast
+						}
+					}
+					if bodyAttributionVersion != 0 {
+						nestedAttribution["version"] = bodyAttributionVersion
+					}
+					if bodyAttributionVisits != 0 {
+						nestedAttribution["visits"] = bodyAttributionVisits
+					}
+					if len(nestedAttribution) > 0 {
+						body["attribution"] = nestedAttribution
+					}
 				}
 				if bodyInterval != "" {
 					body["interval"] = bodyInterval
@@ -123,7 +233,9 @@ func newBillingCreatePricingcheckoutCmd(flags *rootFlags) *cobra.Command {
 						return nil
 					}
 				} else {
-					var wrapped struct{ Data []map[string]any `json:"data"` }
+					var wrapped struct {
+						Data []map[string]any `json:"data"`
+					}
 					if json.Unmarshal(data, &wrapped) == nil && len(wrapped.Data) > 0 {
 						if err := printAutoTable(cmd.OutOrStdout(), wrapped.Data); err != nil {
 							fmt.Fprintf(os.Stderr, "warning: table rendering failed, falling back to JSON: %v\n", err)
@@ -133,7 +245,7 @@ func newBillingCreatePricingcheckoutCmd(flags *rootFlags) *cobra.Command {
 					}
 				}
 			}
-			if flags.asJSON || !isTerminal(cmd.OutOrStdout()) {
+			if flags.asJSON || (!isTerminal(cmd.OutOrStdout()) && !flags.csv && !flags.quiet && !flags.plain) {
 				if flags.quiet {
 					return nil
 				}
@@ -177,7 +289,28 @@ func newBillingCreatePricingcheckoutCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&bodyAcceptedAntiSpamPolicy, "accepted-anti-spam-policy", false, "Accepted anti spam policy")
 	cmd.Flags().BoolVar(&bodyAcceptedOperatorAgreement, "accepted-operator-agreement", false, "Accepted operator agreement")
 	cmd.Flags().BoolVar(&bodyAcceptedTos, "accepted-tos", false, "Accepted tos")
-	cmd.Flags().StringVar(&bodyAttribution, "attribution", "", "Optional client-captured conversion attribution (Phase 2 of plan 2026-04-27-003). The browser persists this in...")
+	cmd.Flags().StringVar(&bodyAttributionFirstLandingPath, "attribution-first-landing-path", "", "Pathname of the landing page (no host).")
+	cmd.Flags().StringVar(&bodyAttributionFirstParamsFbclid, "attribution-first-params-fbclid", "", "Fbclid")
+	cmd.Flags().StringVar(&bodyAttributionFirstParamsGclid, "attribution-first-params-gclid", "", "Gclid")
+	cmd.Flags().StringVar(&bodyAttributionFirstParamsMsclkid, "attribution-first-params-msclkid", "", "Msclkid")
+	cmd.Flags().StringVar(&bodyAttributionFirstParamsUtmCampaign, "attribution-first-params-utm-campaign", "", "Utm campaign")
+	cmd.Flags().StringVar(&bodyAttributionFirstParamsUtmContent, "attribution-first-params-utm-content", "", "Utm content")
+	cmd.Flags().StringVar(&bodyAttributionFirstParamsUtmMedium, "attribution-first-params-utm-medium", "", "Utm medium")
+	cmd.Flags().StringVar(&bodyAttributionFirstParamsUtmSource, "attribution-first-params-utm-source", "", "Utm source")
+	cmd.Flags().StringVar(&bodyAttributionFirstParamsUtmTerm, "attribution-first-params-utm-term", "", "Utm term")
+	cmd.Flags().IntVar(&bodyAttributionFirstTs, "attribution-first-ts", 0, "Epoch milliseconds at landing.")
+	cmd.Flags().StringVar(&bodyAttributionLastLandingPath, "attribution-last-landing-path", "", "Pathname of the landing page (no host).")
+	cmd.Flags().StringVar(&bodyAttributionLastParamsFbclid, "attribution-last-params-fbclid", "", "Fbclid")
+	cmd.Flags().StringVar(&bodyAttributionLastParamsGclid, "attribution-last-params-gclid", "", "Gclid")
+	cmd.Flags().StringVar(&bodyAttributionLastParamsMsclkid, "attribution-last-params-msclkid", "", "Msclkid")
+	cmd.Flags().StringVar(&bodyAttributionLastParamsUtmCampaign, "attribution-last-params-utm-campaign", "", "Utm campaign")
+	cmd.Flags().StringVar(&bodyAttributionLastParamsUtmContent, "attribution-last-params-utm-content", "", "Utm content")
+	cmd.Flags().StringVar(&bodyAttributionLastParamsUtmMedium, "attribution-last-params-utm-medium", "", "Utm medium")
+	cmd.Flags().StringVar(&bodyAttributionLastParamsUtmSource, "attribution-last-params-utm-source", "", "Utm source")
+	cmd.Flags().StringVar(&bodyAttributionLastParamsUtmTerm, "attribution-last-params-utm-term", "", "Utm term")
+	cmd.Flags().IntVar(&bodyAttributionLastTs, "attribution-last-ts", 0, "Epoch milliseconds at landing.")
+	cmd.Flags().IntVar(&bodyAttributionVersion, "attribution-version", 0, "Schema version. Only 1 is currently accepted; future bumps will rotate the localStorage key client-side and add new...")
+	cmd.Flags().IntVar(&bodyAttributionVisits, "attribution-visits", 0, "Visit counter, incremented client-side. Server validator coerces missing/zero/negative values to 1.")
 	cmd.Flags().StringVar(&bodyInterval, "interval", "monthly", "Interval")
 	cmd.Flags().StringVar(&bodyOperatorName, "operator-name", "", "Operator name")
 	cmd.Flags().StringVar(&bodyOversightEmail, "oversight-email", "", "Oversight email")

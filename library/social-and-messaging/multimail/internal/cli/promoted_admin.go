@@ -16,10 +16,10 @@ func newAdminPromotedCmd(flags *rootFlags) *cobra.Command {
 	var bodyTenantId string
 
 	cmd := &cobra.Command{
-		Use:   "admin",
-		Short: "Admin-only. Creates a new API key and emails it to the tenant's oversight email. Used when welcome email failed or...",
-		Long:  "Shortcut for 'admin create'. Admin-only. Creates a new API key and emails it to the tenant's oversight email. Used when welcome email failed or...",
-		Example: "  multimail-pp-cli admin --reason example-value",
+		Use:         "admin",
+		Short:       "Admin-only. Creates a new API key and emails it to the tenant's oversight email. Used when welcome email failed or...",
+		Long:        "Shortcut for 'admin create'. Admin-only. Creates a new API key and emails it to the tenant's oversight email. Used when welcome email failed or...",
+		Example:     "  multimail-pp-cli admin --reason example-value",
 		Annotations: map[string]string{"pp:endpoint": "admin.create", "pp:method": "POST", "pp:path": "/v1/admin/recover-key"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !cmd.Flags().Changed("reason") && !flags.dryRun {
@@ -63,14 +63,12 @@ func newAdminPromotedCmd(flags *rootFlags) *cobra.Command {
 				}
 				printProvenance(cmd, len(countItems), prov)
 			}
-			// CSV bypasses JSON pipe path so --csv works when piped
-			if flags.csv {
-				return printOutputWithFlags(cmd.OutOrStdout(), data, flags)
-			}
 			// For JSON output, wrap with provenance envelope. --select wins over
 			// --compact when both are set; --compact only runs when no explicit
-			// fields were requested.
-			if flags.asJSON || !isTerminal(cmd.OutOrStdout()) {
+			// fields were requested. Explicit format flags (--csv, --quiet, --plain)
+			// opt out of the auto-JSON path so piped consumers that asked for a
+			// non-JSON format reach the standard pipeline below.
+			if flags.asJSON || (!isTerminal(cmd.OutOrStdout()) && !flags.csv && !flags.quiet && !flags.plain) {
 				filtered := data
 				if flags.selectFields != "" {
 					filtered = filterFields(filtered, flags.selectFields)

@@ -17,14 +17,14 @@ func newUsagePromotedCmd(flags *rootFlags) *cobra.Command {
 	var flagBreakdown string
 
 	cmd := &cobra.Command{
-		Use:   "usage",
-		Short: "Requires read scope. Returns usage counts for the current billing period.",
-		Long:  "Shortcut for 'usage list'. Requires read scope. Returns usage counts for the current billing period.",
-		Example: "  multimail-pp-cli usage",
+		Use:         "usage",
+		Short:       "Requires read scope. Returns usage counts for the current billing period.",
+		Long:        "Shortcut for 'usage list'. Requires read scope. Returns usage counts for the current billing period.",
+		Example:     "  multimail-pp-cli usage",
 		Annotations: map[string]string{"pp:endpoint": "usage.list", "pp:method": "GET", "pp:path": "/v1/usage", "mcp:read-only": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("breakdown") {
-				allowedBreakdown := []string{ "daily" }
+				allowedBreakdown := []string{"daily"}
 				validBreakdown := false
 				for _, v := range allowedBreakdown {
 					if flagBreakdown == v {
@@ -69,14 +69,12 @@ func newUsagePromotedCmd(flags *rootFlags) *cobra.Command {
 				}
 				printProvenance(cmd, len(countItems), prov)
 			}
-			// CSV bypasses JSON pipe path so --csv works when piped
-			if flags.csv {
-				return printOutputWithFlags(cmd.OutOrStdout(), data, flags)
-			}
 			// For JSON output, wrap with provenance envelope. --select wins over
 			// --compact when both are set; --compact only runs when no explicit
-			// fields were requested.
-			if flags.asJSON || !isTerminal(cmd.OutOrStdout()) {
+			// fields were requested. Explicit format flags (--csv, --quiet, --plain)
+			// opt out of the auto-JSON path so piped consumers that asked for a
+			// non-JSON format reach the standard pipeline below.
+			if flags.asJSON || (!isTerminal(cmd.OutOrStdout()) && !flags.csv && !flags.quiet && !flags.plain) {
 				filtered := data
 				if flags.selectFields != "" {
 					filtered = filterFields(filtered, flags.selectFields)

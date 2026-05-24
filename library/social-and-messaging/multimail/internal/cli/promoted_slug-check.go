@@ -14,10 +14,10 @@ import (
 func newSlugCheckPromotedCmd(flags *rootFlags) *cobra.Command {
 
 	cmd := &cobra.Command{
-		Use:   "slug-check <slug>",
-		Short: "Check if a slug is available for registration. Returns suggestions if taken or reserved. No auth required.",
-		Long:  "Shortcut for 'slug-check get'. Check if a slug is available for registration. Returns suggestions if taken or reserved. No auth required.",
-		Example: "  multimail-pp-cli slug-check example-value",
+		Use:         "slug-check <slug>",
+		Short:       "Check if a slug is available for registration. Returns suggestions if taken or reserved. No auth required.",
+		Long:        "Shortcut for 'slug-check get'. Check if a slug is available for registration. Returns suggestions if taken or reserved. No auth required.",
+		Example:     "  multimail-pp-cli slug-check example-value",
 		Annotations: map[string]string{"pp:endpoint": "slug-check.get", "pp:method": "GET", "pp:path": "/v1/slug-check/{slug}", "mcp:read-only": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := flags.newClient()
@@ -58,14 +58,12 @@ func newSlugCheckPromotedCmd(flags *rootFlags) *cobra.Command {
 				}
 				printProvenance(cmd, len(countItems), prov)
 			}
-			// CSV bypasses JSON pipe path so --csv works when piped
-			if flags.csv {
-				return printOutputWithFlags(cmd.OutOrStdout(), data, flags)
-			}
 			// For JSON output, wrap with provenance envelope. --select wins over
 			// --compact when both are set; --compact only runs when no explicit
-			// fields were requested.
-			if flags.asJSON || !isTerminal(cmd.OutOrStdout()) {
+			// fields were requested. Explicit format flags (--csv, --quiet, --plain)
+			// opt out of the auto-JSON path so piped consumers that asked for a
+			// non-JSON format reach the standard pipeline below.
+			if flags.asJSON || (!isTerminal(cmd.OutOrStdout()) && !flags.csv && !flags.quiet && !flags.plain) {
 				filtered := data
 				if flags.selectFields != "" {
 					filtered = filterFields(filtered, flags.selectFields)

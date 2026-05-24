@@ -9,11 +9,14 @@ import (
 
 func newWellKnownCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "well-known",
-		Short: "Manage well known",
+		Use:    "well-known",
+		Short:  "Manage well known",
+		Hidden: true,
 	}
 
 	cmd.AddCommand(newWellKnownGetCmd(flags))
 	cmd.AddCommand(newWellKnownListCmd(flags))
+	cmd.AddCommand(newWellKnownListWellknownCmd(flags))
+	cmd.AddCommand(newWellKnownListWellknown2Cmd(flags))
 	return cmd
 }

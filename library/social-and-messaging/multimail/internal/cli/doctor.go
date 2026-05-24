@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/client"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/config"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/store"
 	"github.com/spf13/cobra"
+	"multimail-pp-cli/internal/client"
+	"multimail-pp-cli/internal/config"
+	"multimail-pp-cli/internal/store"
 )
 
 // looksLikeDoctorInterstitial reports whether the response body matches a known
@@ -85,12 +85,14 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			// Check auth
+			authConfigured := false
 			if cfg != nil {
 				header := cfg.AuthHeader()
 				if header == "" {
 					report["auth"] = "not configured"
 					report["auth_hint"] = "export MULTIMAIL_BEARER_AUTH=<your-key>"
 				} else {
+					authConfigured = true
 					report["auth"] = "configured"
 					report["auth_source"] = cfg.AuthSource
 				}
@@ -105,6 +107,12 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 			authEnvOptionalSatisfied := false
 			if os.Getenv("MULTIMAIL_BEARER_AUTH") != "" {
 				authEnvSet = append(authEnvSet, "MULTIMAIL_BEARER_AUTH")
+			} else if authConfigured {
+				authSource, _ := report["auth_source"].(string)
+				if authSource == "" {
+					authSource = "config"
+				}
+				authEnvInfo = append(authEnvInfo, "credentials available from "+authSource)
 			} else {
 				authEnvRequiredMissing = append(authEnvRequiredMissing, "MULTIMAIL_BEARER_AUTH")
 			}
@@ -113,6 +121,8 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 				report["env_vars"] = "ERROR missing required: " + strings.Join(authEnvRequiredMissing, ", ")
 			case len(authEnvOptionalNames) > 1 && !authEnvOptionalSatisfied:
 				report["env_vars"] = "INFO set one of: " + strings.Join(authEnvOptionalNames, " or ")
+			case len(authEnvInfo) > 0 && authConfigured:
+				report["env_vars"] = "OK " + strings.Join(authEnvInfo, "; ")
 			case len(authEnvInfo) > 0:
 				report["env_vars"] = "INFO " + strings.Join(authEnvInfo, "; ")
 			default:
@@ -172,34 +182,7 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 					} else if reachErr != nil && !errors.As(reachErr, &reachAPIErr) {
 						report["credentials"] = "skipped (API unreachable)"
 					} else {
-						verifyPath := "/"
-						authParams := map[string]string{}
-						authHeaders := map[string]string{}
-						authHeaders["Authorization"] = authHeader
-						authHeaders["User-Agent"] = "multimail-pp-cli"
-						_, authErr := c.GetWithHeaders(verifyPath, authParams, authHeaders)
-						var authAPIErr *client.APIError
-						switch {
-						case authErr == nil:
-							report["credentials"] = "valid"
-						case errors.As(authErr, &authAPIErr):
-							switch {
-							case authAPIErr.StatusCode == 401 || authAPIErr.StatusCode == 403:
-								// The probe hit the bare base URL because no auth.verify_path
-								// is configured in the spec. Many APIs return 401/403 from a
-								// bare versioned root regardless of token validity (the path
-								// isn't routed but the gateway still demands credentials).
-								// Don't claim invalid without certainty — set verify_path to
-								// a known-good authenticated GET (e.g. /me, /v1/account, /user)
-								// for a definitive verdict.
-								report["credentials"] = fmt.Sprintf("inconclusive (HTTP %d from base URL — set auth.verify_path in spec for a definitive probe)", authAPIErr.StatusCode)
-							default:
-								// Non-auth HTTP error (404, 500, etc.) — don't blame credentials
-								report["credentials"] = fmt.Sprintf("ok (HTTP %d from %s, but auth was accepted)", authAPIErr.StatusCode, verifyPath)
-							}
-						default:
-							report["credentials"] = fmt.Sprintf("error: %s", authErr)
-						}
+						report["credentials"] = "present (not verified — set auth.verify_path in spec for an API acceptance check)"
 					}
 				}
 			} else if cfg != nil && cfg.BaseURL == "" {
@@ -244,11 +227,7 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 				case strings.HasPrefix(s, "optional"):
 					// Optional-auth CLI with no key set — informational, not a failure.
 					indicator = yellow("INFO")
-				case strings.HasPrefix(s, "inconclusive"):
-					// The credential probe could not produce a definitive verdict
-					// (typically because the bare base URL returns 401/403 even for
-					// valid tokens). Surface as WARN, not FAIL — the user's actual
-					// commands will reveal a real auth failure if one exists.
+				case strings.Contains(s, "scope-limited"):
 					indicator = yellow("WARN")
 				case strings.Contains(s, "error") || strings.Contains(s, "not configured") || strings.Contains(s, "unreachable") || strings.Contains(s, "invalid") || strings.Contains(s, "missing"):
 					indicator = red("FAIL")

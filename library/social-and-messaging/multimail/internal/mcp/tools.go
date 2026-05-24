@@ -14,12 +14,12 @@ import (
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/cli"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/client"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/cliutil"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/config"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/mcp/cobratree"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/store"
+	"multimail-pp-cli/internal/cli"
+	"multimail-pp-cli/internal/client"
+	"multimail-pp-cli/internal/cliutil"
+	"multimail-pp-cli/internal/config"
+	"multimail-pp-cli/internal/mcp/cobratree"
+	"multimail-pp-cli/internal/store"
 )
 
 // RegisterTools registers all API operations as MCP tools.
@@ -106,6 +106,40 @@ func RegisterTools(s *server.MCPServer) {
 		makeAPIHandler("POST", "/v1/admin/recover-key", []mcpParamBinding{{PublicName: "reason", WireName: "reason", Location: "body"}, {PublicName: "tenant_id", WireName: "tenant_id", Location: "body"}}, []string{}),
 	)
 	s.AddTool(
+		mcplib.NewTool("agent_create",
+			mcplib.WithDescription("Initiates agent registration using verified_email identity assertion. Sends a 6-digit OTP to the provided email and returns a claim_token for completing the registration. Required: assertion, assertion_type, type. Optional: operator_name, requested_credential_type, requested_oversight_mode."),
+			mcplib.WithString("assertion", mcplib.Required(), mcplib.Description("Assertion")),
+			mcplib.WithString("assertion_type", mcplib.Required(), mcplib.Description("Assertion type. Only verified_email is supported.")),
+			mcplib.WithString("operator_name", mcplib.Description("Optional operator name. Derived from email local part if absent.")),
+			mcplib.WithString("requested_credential_type", mcplib.Description("Credential type. Only api_key is supported.")),
+			mcplib.WithString("requested_oversight_mode", mcplib.Description("Optional initial oversight mode for the mailbox.")),
+			mcplib.WithString("type", mcplib.Required(), mcplib.Description("Registration type. Only identity_assertion is supported.")),
+			mcplib.WithDestructiveHintAnnotation(false),
+			mcplib.WithOpenWorldHintAnnotation(true),
+		),
+		makeAPIHandler("POST", "/agent/auth", []mcpParamBinding{{PublicName: "assertion", WireName: "assertion", Location: "body"}, {PublicName: "assertion_type", WireName: "assertion_type", Location: "body"}, {PublicName: "operator_name", WireName: "operator_name", Location: "body"}, {PublicName: "requested_credential_type", WireName: "requested_credential_type", Location: "body"}, {PublicName: "requested_oversight_mode", WireName: "requested_oversight_mode", Location: "body"}, {PublicName: "type", WireName: "type", Location: "body"}}, []string{}),
+	)
+	s.AddTool(
+		mcplib.NewTool("agent_create-auth",
+			mcplib.WithDescription("Completes the auth.md registration by validating the claim_token and OTP. On success, atomically creates the tenant account and returns API credentials. Required: claim_token, otp."),
+			mcplib.WithString("claim_token", mcplib.Required(), mcplib.Description("Claim token returned from POST /agent/auth")),
+			mcplib.WithString("otp", mcplib.Required(), mcplib.Description("6-digit OTP from verification email")),
+			mcplib.WithDestructiveHintAnnotation(false),
+			mcplib.WithOpenWorldHintAnnotation(true),
+		),
+		makeAPIHandler("POST", "/agent/auth/claim/complete", []mcpParamBinding{{PublicName: "claim_token", WireName: "claim_token", Location: "body"}, {PublicName: "otp", WireName: "otp", Location: "body"}}, []string{}),
+	)
+	s.AddTool(
+		mcplib.NewTool("agent_list",
+			mcplib.WithDescription("Human-facing page that displays the 6-digit OTP for agent registration. Linked from the verification email. Required: token."),
+			mcplib.WithString("token", mcplib.Required(), mcplib.Description("Claim view token from verification email")),
+			mcplib.WithReadOnlyHintAnnotation(true),
+			mcplib.WithDestructiveHintAnnotation(false),
+			mcplib.WithOpenWorldHintAnnotation(true),
+		),
+		makeAPIHandler("GET", "/agent/auth/claim/view", []mcpParamBinding{{PublicName: "token", WireName: "token", Location: "query"}}, []string{}),
+	)
+	s.AddTool(
 		mcplib.NewTool("api-keys_create",
 			mcplib.WithDescription("Requires admin scope. The raw key is returned only once in the response. Required: name. Optional: scopes (default: [read]). Returns the new ApiKeysCreateResponse."),
 			mcplib.WithString("name", mcplib.Required(), mcplib.Description("Name")),
@@ -173,6 +207,15 @@ func RegisterTools(s *server.MCPServer) {
 			mcplib.WithOpenWorldHintAnnotation(true),
 		),
 		makeAPIHandler("GET", "/v1/audit-log", []mcpParamBinding{{PublicName: "limit", WireName: "limit", Location: "query"}, {PublicName: "cursor", WireName: "cursor", Location: "query"}}, []string{}),
+	)
+	s.AddTool(
+		mcplib.NewTool("auth-md_list",
+			mcplib.WithDescription("Returns a markdown document describing MultiMail's agent registration flow, trust ladder, and scope model. Used by agents following the auth.md protocol."),
+			mcplib.WithReadOnlyHintAnnotation(true),
+			mcplib.WithDestructiveHintAnnotation(false),
+			mcplib.WithOpenWorldHintAnnotation(true),
+		),
+		makeAPIHandler("GET", "/auth.md", []mcpParamBinding{}, []string{}),
 	)
 	s.AddTool(
 		mcplib.NewTool("billing_create",
@@ -444,6 +487,39 @@ func RegisterTools(s *server.MCPServer) {
 			mcplib.WithOpenWorldHintAnnotation(true),
 		),
 		makeAPIHandler("PATCH", "/v1/mailboxes/{mailboxId}", []mcpParamBinding{{PublicName: "mailboxId", WireName: "mailboxId", Location: "path"}, {PublicName: "auto_bcc", WireName: "auto_bcc", Location: "body"}, {PublicName: "auto_cc", WireName: "auto_cc", Location: "body"}, {PublicName: "display_name", WireName: "display_name", Location: "body"}, {PublicName: "forward_inbound", WireName: "forward_inbound", Location: "body"}, {PublicName: "oversight_mode", WireName: "oversight_mode", Location: "body"}, {PublicName: "oversight_webhook_url", WireName: "oversight_webhook_url", Location: "body"}, {PublicName: "signature_block", WireName: "signature_block", Location: "body"}, {PublicName: "webhook_url", WireName: "webhook_url", Location: "body"}}, []string{"mailboxId"}),
+	)
+	s.AddTool(
+		mcplib.NewTool("mailboxes_allowlist_create",
+			mcplib.WithDescription("Requires admin scope + operator approval. Adds a recipient pattern (exact email or *@domain.com wildcard) that bypasses gated_send approval. Subject to plan-tier limits. Required: mailboxId, pattern. Optional: approval_code, note. Returns the new AllowlistCreateResponse."),
+			mcplib.WithString("mailboxId", mcplib.Required(), mcplib.Description("Mailbox id")),
+			mcplib.WithString("approval_code", mcplib.Description("Operator approval code (omit to request one)")),
+			mcplib.WithString("note", mcplib.Description("Optional note for audit trail")),
+			mcplib.WithString("pattern", mcplib.Required(), mcplib.Description("Email address or *@domain.com wildcard")),
+			mcplib.WithDestructiveHintAnnotation(false),
+			mcplib.WithOpenWorldHintAnnotation(true),
+		),
+		makeAPIHandler("POST", "/v1/mailboxes/{mailboxId}/allowlist", []mcpParamBinding{{PublicName: "mailboxId", WireName: "mailboxId", Location: "path"}, {PublicName: "approval_code", WireName: "approval_code", Location: "body"}, {PublicName: "note", WireName: "note", Location: "body"}, {PublicName: "pattern", WireName: "pattern", Location: "body"}}, []string{"mailboxId"}),
+	)
+	s.AddTool(
+		mcplib.NewTool("mailboxes_allowlist_delete",
+			mcplib.WithDescription("Requires admin scope + operator approval. Removes a sending allowlist pattern. Required: mailboxId, entryId. Optional: approval_code. Destructive."),
+			mcplib.WithString("mailboxId", mcplib.Required(), mcplib.Description("Mailbox id")),
+			mcplib.WithString("entryId", mcplib.Required(), mcplib.Description("Entry id")),
+			mcplib.WithString("approval_code", mcplib.Description("Operator approval code (omit to request one)")),
+			mcplib.WithDestructiveHintAnnotation(true),
+			mcplib.WithOpenWorldHintAnnotation(true),
+		),
+		makeAPIHandler("DELETE", "/v1/mailboxes/{mailboxId}/allowlist/{entryId}", []mcpParamBinding{{PublicName: "mailboxId", WireName: "mailboxId", Location: "path"}, {PublicName: "entryId", WireName: "entryId", Location: "path"}, {PublicName: "approval_code", WireName: "approval_code", Location: "body"}}, []string{"mailboxId", "entryId"}),
+	)
+	s.AddTool(
+		mcplib.NewTool("mailboxes_allowlist_get",
+			mcplib.WithDescription("Any API key with read scope can list entries. Returns all sending allowlist patterns for the mailbox. The allowlist does not grant send permission — it only determines whether approved sends skip the oversight queue. Required: mailboxId."),
+			mcplib.WithString("mailboxId", mcplib.Required(), mcplib.Description("Mailbox id")),
+			mcplib.WithReadOnlyHintAnnotation(true),
+			mcplib.WithDestructiveHintAnnotation(false),
+			mcplib.WithOpenWorldHintAnnotation(true),
+		),
+		makeAPIHandler("GET", "/v1/mailboxes/{mailboxId}/allowlist", []mcpParamBinding{{PublicName: "mailboxId", WireName: "mailboxId", Location: "path"}}, []string{"mailboxId"}),
 	)
 	s.AddTool(
 		mcplib.NewTool("mailboxes_emails_create",
@@ -822,6 +898,24 @@ func RegisterTools(s *server.MCPServer) {
 		),
 		makeAPIHandler("GET", "/.well-known/multimail-signing-key", []mcpParamBinding{}, []string{}),
 	)
+	s.AddTool(
+		mcplib.NewTool("well-known_list-wellknown",
+			mcplib.WithDescription("Returns OAuth authorization server metadata with an agent_auth extension block describing the auth.md agent registration flow."),
+			mcplib.WithReadOnlyHintAnnotation(true),
+			mcplib.WithDestructiveHintAnnotation(false),
+			mcplib.WithOpenWorldHintAnnotation(true),
+		),
+		makeAPIHandler("GET", "/.well-known/oauth-authorization-server", []mcpParamBinding{}, []string{}),
+	)
+	s.AddTool(
+		mcplib.NewTool("well-known_list-wellknown-2",
+			mcplib.WithDescription("Returns metadata about MultiMail as an OAuth-protected resource, including supported scopes and authorization servers. Part of the auth.md agent registration protocol."),
+			mcplib.WithReadOnlyHintAnnotation(true),
+			mcplib.WithDestructiveHintAnnotation(false),
+			mcplib.WithOpenWorldHintAnnotation(true),
+		),
+		makeAPIHandler("GET", "/.well-known/oauth-protected-resource", []mcpParamBinding{}, []string{}),
+	)
 	// Search tool — faster than iterating list endpoints for finding specific items
 	s.AddTool(
 		mcplib.NewTool("search",
@@ -1149,9 +1243,9 @@ func handleSQL(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToo
 func handleContext(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	ctx := map[string]any{
 		"api":         "multimail",
-		"description": "Email-as-a-Service for AI agents. Inbound email converted to markdown, outbound markdown converted to HTML. Built on...",
-		"archetype":   "crm",
-		"tool_count":  77,
+		"description": "Every MultiMail feature, plus cross-mailbox search, oversight analytics, and trust ladder tracking no other tool has.",
+		"archetype":   "communication",
+		"tool_count":  86,
 		// tool_surface tells agents which surface a capability lives on.
 		"tool_surface": "MCP exposes typed endpoint tools plus a runtime mirror of user-facing CLI commands. Endpoint tools keep typed schemas; command-mirror tools shell out to the companion multimail-pp-cli binary.",
 		"auth": map[string]any{
@@ -1181,6 +1275,12 @@ func handleContext(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToo
 				"searchable":  true,
 			},
 			{
+				"name":        "agent",
+				"description": "Manage agent",
+				"endpoints":   []string{"create", "create-auth", "list"},
+				"searchable":  true,
+			},
+			{
 				"name":        "api-keys",
 				"description": "Manage api keys",
 				"endpoints":   []string{"create", "delete", "list", "update"},
@@ -1199,6 +1299,12 @@ func handleContext(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToo
 				"endpoints":   []string{"list"},
 				"syncable":    true,
 				"searchable":  true,
+			},
+			{
+				"name":        "auth-md",
+				"description": "Manage auth md",
+				"endpoints":   []string{"list"},
+				"syncable":    true,
 			},
 			{
 				"name":        "billing",
@@ -1321,7 +1427,7 @@ func handleContext(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToo
 			{
 				"name":        "well-known",
 				"description": "Manage well known",
-				"endpoints":   []string{"get", "list"},
+				"endpoints":   []string{"get", "list", "list-wellknown", "list-wellknown-2"},
 				"syncable":    true,
 				"searchable":  true,
 			},
@@ -1337,26 +1443,22 @@ func handleContext(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToo
 		// Command-mirror capabilities are exposed through MCP by shelling out
 		// to the companion CLI binary.
 		"command_mirror_capabilities": []map[string]string{
-			{"name": "Inbox health composite score", "command": "mm health", "description": "", "rationale": "", "via": "mcp-command-mirror"},
-			{"name": "Stale thread detection", "command": "mm stale", "description": "", "rationale": "", "via": "mcp-command-mirror"},
-			{"name": "Oversight dashboard", "command": "mm oversight summary", "description": "", "rationale": "", "via": "mcp-command-mirror"},
-			{"name": "Trust ladder status", "command": "mm trust status", "description": "", "rationale": "", "via": "mcp-command-mirror"},
-			{"name": "Quota forecast", "command": "mm quota forecast", "description": "", "rationale": "", "via": "mcp-command-mirror"},
-			{"name": "Send analytics", "command": "mm stats", "description": "", "rationale": "", "via": "mcp-command-mirror"},
-			{"name": "Offline email search", "command": "mm search", "description": "", "rationale": "", "via": "mcp-command-mirror"},
-			{"name": "Incremental sync", "command": "mm sync", "description": "", "rationale": "", "via": "mcp-command-mirror"},
+			{"name": "Cross-mailbox search", "command": "search", "description": "Full-text search across all synced mailboxes at once — find any email regardless of which mailbox received it.", "rationale": "API search is per-mailbox only; cross-mailbox search requires N sequential API calls without local cache.", "via": "mcp-command-mirror"},
+			{"name": "Oversight velocity", "command": "oversight velocity", "description": "See approval/rejection rates and median decision latency per mailbox across your entire fleet.", "rationale": "Requires joining audit events with oversight decisions in local SQLite; no API endpoint aggregates decision velocity...", "via": "mcp-command-mirror"},
+			{"name": "Trust ladder status", "command": "trust status", "description": "Fleet-wide view of each mailbox's oversight mode, time-at-level, and upgrade history.", "rationale": "Requires joining mailbox configs with audit events filtered for upgrade actions; API returns current mode but not...", "via": "mcp-command-mirror"},
+			{"name": "Allowlist coverage", "command": "allowlist coverage", "description": "See what percentage of recent recipients are covered by allowlist patterns vs gated.", "rationale": "Requires joining allowlist entries with sent emails and matching exact + wildcard patterns locally; no API endpoint...", "via": "mcp-command-mirror"},
+			{"name": "Inbox health", "command": "inbox health", "description": "Per-mailbox health snapshot: unread count, oldest unread age, reply rate, and thread depth.", "rationale": "Requires aggregation over synced emails table; no API endpoint returns these composite metrics.", "via": "mcp-command-mirror"},
+			{"name": "Stale thread detection", "command": "threads stale", "description": "List conversation threads with no reply in N days — surfaces dropped conversations.", "rationale": "Requires time-windowed join of threads and emails in local SQLite; API has no 'inactive threads' query.", "via": "mcp-command-mirror"},
 		},
 		"playbook": []map[string]string{
-			{"topic": "Inbox health composite score", "insight": ""},
-			{"topic": "Stale thread detection", "insight": ""},
-			{"topic": "Oversight dashboard", "insight": ""},
-			{"topic": "Trust ladder status", "insight": ""},
-			{"topic": "Quota forecast", "insight": ""},
-			{"topic": "Send analytics", "insight": ""},
-			{"topic": "Offline email search", "insight": ""},
-			{"topic": "Incremental sync", "insight": ""},
-			{"topic": "Contact lookup", "insight": "Use search for finding contacts by name/email. List endpoints return unsorted results and require pagination for large datasets."},
-			{"topic": "Activity tracking", "insight": "When checking deal activity, sync first and query locally. CRM APIs often throttle activity-log endpoints heavily."},
+			{"topic": "Cross-mailbox search", "insight": "API search is per-mailbox only; cross-mailbox search requires N sequential API calls without local cache."},
+			{"topic": "Oversight velocity", "insight": "Requires joining audit events with oversight decisions in local SQLite; no API endpoint aggregates decision velocity cross-mailbox."},
+			{"topic": "Trust ladder status", "insight": "Requires joining mailbox configs with audit events filtered for upgrade actions; API returns current mode but not progression timeline."},
+			{"topic": "Allowlist coverage", "insight": "Requires joining allowlist entries with sent emails and matching exact + wildcard patterns locally; no API endpoint diffs these."},
+			{"topic": "Inbox health", "insight": "Requires aggregation over synced emails table; no API endpoint returns these composite metrics."},
+			{"topic": "Stale thread detection", "insight": "Requires time-windowed join of threads and emails in local SQLite; API has no 'inactive threads' query."},
+			{"topic": "Message search", "insight": "Use the search tool on synced data rather than paginating through message history. Message APIs often have aggressive rate limits."},
+			{"topic": "Channel health", "insight": "When analyzing channel activity, use the channel-health command or sql aggregation on synced messages. Don't iterate individual messages via API."},
 		},
 	}
 	data, _ := json.MarshalIndent(ctx, "", "  ")

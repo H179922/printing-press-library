@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "multimail-pp-mcp",
   "display_name": "Multimail",
-  "version": "4.2.0",
+  "version": "4.4.0",
   "description": "Multimail API surface as MCP tools.",
   "author": {
     "name": "CLI Printing Press"

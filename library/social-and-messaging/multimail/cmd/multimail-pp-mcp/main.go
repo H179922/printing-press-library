@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/mark3labs/mcp-go/server"
-	mcptools "github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/mcp"
+	mcptools "multimail-pp-cli/internal/mcp"
 )
 
 func main() {

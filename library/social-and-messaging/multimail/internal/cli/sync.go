@@ -6,6 +6,8 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/spf13/cobra"
+	"multimail-pp-cli/internal/store"
 	"net/url"
 	"os"
 	"regexp"
@@ -14,9 +16,16 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"github.com/mvanhorn/printing-press-library/library/social-and-messaging/multimail/internal/store"
-	"github.com/spf13/cobra"
 )
+
+// unresolvedPathKeyRE matches `{key}` placeholders left in a sync path
+// after syncResourcePath() resolution. Hierarchical APIs (Yahoo Fantasy,
+// Reddit pre-2024, YouTube Data v3, MLB Stats, etc.) declare paths like
+// "/league/{league_key}/players" that can only be filled from parent
+// context — flat-list sync cannot fill them. Resources with unresolved
+// keys emit sync_warning and are skipped without aborting the run, so
+// sync still completes for resources that DO have resolvable paths.
+var unresolvedPathKeyRE = regexp.MustCompile(`\{[a-zA-Z_][a-zA-Z0-9_]*\}`)
 
 // syncResult holds the outcome of syncing a single resource.
 type syncResult struct {
@@ -36,6 +45,8 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var maxPages int
 	var latestOnly bool
 	var strict bool
+	var paramFlags []string
+	var resourceParamFlags []string
 
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -75,6 +86,11 @@ Exit codes & warnings:
   # Latest-only: refresh head of each resource, no historical backfill
   multimail-pp-cli sync --latest-only`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			userParams, err := parseSyncUserParams(paramFlags, resourceParamFlags)
+			if err != nil {
+				return usageErr(err)
+			}
+
 			c, err := flags.newClient()
 			if err != nil {
 				return err
@@ -90,10 +106,22 @@ Exit codes & warnings:
 				return fmt.Errorf("opening local database: %w", err)
 			}
 			defer db.Close()
+			// Snapshot before defaults expand, so an empty user filter stays empty
+			// and dependents inherit "sync everything" instead of the default list.
+			parentFilter := append([]string(nil), resources...)
 
 			// If no specific resources, sync top-level resources
 			if len(resources) == 0 {
 				resources = defaultSyncResources()
+			}
+
+			// Reject --resource-param keys that don't match a known resource.
+			// Validates against the full top-level + dependent set, not the
+			// user-filtered `resources` slice, so legitimate cases like
+			// "filter to A, but apply param to B if it gets synced" still
+			// catch typos without false positives.
+			if err := userParams.validateResourceNames(knownSyncResourceNames()); err != nil {
+				return usageErr(err)
 			}
 
 			// --full: clear all sync cursors before starting
@@ -125,6 +153,13 @@ Exit codes & warnings:
 					fmt.Fprintln(os.Stderr, "warning: --latest-only ignored because --since is set; --since takes precedence")
 				}
 			}
+			// effectiveLatestOnly drives the max_pages_cap_hit suppression
+			// below. It must reflect whether --latest-only is actually the
+			// cap source — i.e., only when --since is empty. If --since wins
+			// (block above), --latest-only is a no-op for maxPages and any
+			// cap hit reflects the default --max-pages 100 limit, which is
+			// a real anomaly worth surfacing.
+			effectiveLatestOnly := latestOnly && since == ""
 
 			// Resolve --since into an RFC3339 timestamp
 			sinceTS := ""
@@ -151,7 +186,7 @@ Exit codes & warnings:
 				go func() {
 					defer wg.Done()
 					for resource := range work {
-						res := syncResource(c, db, resource, sinceTS, full, maxPages)
+						res := syncResource(c, db, resource, sinceTS, full, maxPages, effectiveLatestOnly, userParams)
 						results <- res
 					}
 				}()
@@ -197,7 +232,7 @@ Exit codes & warnings:
 				}
 			}
 			// Sync dependent (parent-child) resources sequentially after flat resources.
-			depResults := syncDependentResources(c, db, sinceTS, full, maxPages)
+			depResults := syncDependentResources(c, db, sinceTS, full, maxPages, effectiveLatestOnly, parentFilter, userParams)
 			for _, res := range depResults {
 				if res.Err != nil {
 					if humanFriendly {
@@ -280,16 +315,20 @@ Exit codes & warnings:
 	cmd.Flags().IntVar(&maxPages, "max-pages", 100, "Maximum pages to fetch per resource (0 = unlimited; cap-hit emits a sync_warning event)")
 	cmd.Flags().BoolVar(&latestOnly, "latest-only", false, "Refresh head of each resource only; clears resume cursor and caps pages at 1. Mutually exclusive with --since (--since wins).")
 	cmd.Flags().BoolVar(&strict, "strict", false, "Exit non-zero on any per-resource failure (default: only critical failures or all-resource failure exit non-zero).")
+	cmd.Flags().StringArrayVar(&paramFlags, "param", nil, "Extra query param to inject into every sync request (repeatable, key=value). Use for APIs whose spec marks a filter optional but the endpoint rejects calls without it (e.g. --param mine=true). Avoid pagination keys (limit/since/cursor) — overriding them corrupts resume state.")
+	cmd.Flags().StringArrayVar(&resourceParamFlags, "resource-param", nil, "Per-resource extra query param (repeatable, resource:key=value). Wins over --param when both define the same key.")
 
 	return cmd
 }
 
 // syncResource handles the full paginated sync of a single resource.
 // It resumes from the last cursor unless sinceTS or full mode overrides it.
+// channel_workflow.go.tmpl mirrors the trailing dates arg conditional;
+// keep both call sites in sync if this signature changes.
 func syncResource(c interface {
 	Get(string, map[string]string) (json.RawMessage, error)
 	RateLimit() float64
-}, db *store.Store, resource, sinceTS string, full bool, maxPages int) syncResult {
+}, db *store.Store, resource, sinceTS string, full bool, maxPages int, latestOnly bool, userParams *syncUserParams) syncResult {
 	started := time.Now()
 
 	if !humanFriendly {
@@ -300,6 +339,43 @@ func syncResource(c interface {
 	if err != nil {
 		return syncResult{Resource: resource, Err: err, Duration: time.Since(started)}
 	}
+
+	// Skip resources whose path template still contains unresolved `{key}`
+	// placeholders after syncResourcePath() resolution. These paths require
+	// parent context (league_key, team_key, channel_id, etc.) that flat-list
+	// sync cannot fill. Emit a sync_warning describing the missing keys and
+	// continue — sync exits 0 if any resource succeeded, so this keeps
+	// hierarchical-API CLIs functional for the resources they CAN sync flat.
+	if missingKeys := unresolvedPathKeyRE.FindAllString(path, -1); len(missingKeys) > 0 {
+		if !humanFriendly {
+			payload := struct {
+				Event    string   `json:"event"`
+				Resource string   `json:"resource"`
+				Reason   string   `json:"reason"`
+				Keys     []string `json:"keys"`
+				Path     string   `json:"path"`
+				Message  string   `json:"message"`
+			}{
+				Event:    "sync_warning",
+				Resource: resource,
+				Reason:   "unfilled_path_key",
+				Keys:     missingKeys,
+				Path:     path,
+				Message:  fmt.Sprintf("path %s requires parent context (%s); resource skipped", path, strings.Join(missingKeys, ", ")),
+			}
+			payloadJSON, _ := json.Marshal(payload)
+			fmt.Fprintf(os.Stdout, "%s\n", payloadJSON)
+		} else {
+			fmt.Fprintf(os.Stderr, "  %s skipped (requires parent context: %s)\n",
+				resource, strings.Join(missingKeys, ", "))
+		}
+		return syncResult{
+			Resource: resource,
+			Warn:     fmt.Errorf("skipped %s: unresolved path keys %v", resource, missingKeys),
+			Duration: time.Since(started),
+		}
+	}
+
 	var totalCount int
 
 	// Resume cursor from sync_state (unless --full cleared it)
@@ -308,10 +384,23 @@ func syncResource(c interface {
 	// Determine the since param value:
 	// 1. Explicit --since flag takes priority
 	// 2. Otherwise use last_synced_at from sync_state for incremental sync
-	sinceParam := determineSinceParam()
+	sinceParam := syncResourceSinceParam(resource)
 	effectiveSince := sinceTS
 	if effectiveSince == "" && !lastSynced.IsZero() && !full {
 		effectiveSince = lastSynced.Format(time.RFC3339)
+	}
+	// Resources whose list endpoint declares no temporal-filter parameter
+	// fall back to plain pagination — sending a synthetic since=... would
+	// reach the API as an unknown query param and (for strict APIs like
+	// Notion) fail the whole resource with a 400. Warn once per resource
+	// when the user expected incremental behavior.
+	if effectiveSince != "" && sinceParam == "" {
+		if humanFriendly {
+			fmt.Fprintf(os.Stderr, "  %s: incremental sync ignored (endpoint declares no temporal filter; falling back to full pagination)\n", resource)
+		} else {
+			fmt.Fprintf(os.Stdout, `{"event":"sync_warning","resource":"%s","reason":"resource_not_incremental","message":"endpoint does not declare a temporal filter parameter; incremental sync has no effect for this resource"}`+"\n", resource)
+		}
+		effectiveSince = ""
 	}
 
 	cursor := existingCursor
@@ -348,6 +437,11 @@ func syncResource(c interface {
 			params[sinceParam] = effectiveSince
 		}
 
+		// Apply user-supplied --param / --resource-param overrides last so they
+		// win over spec-derived defaults (e.g. forcing mine=true on a list
+		// endpoint whose OpenAPI spec marks the filter optional).
+		userParams.applyTo(resource, params)
+
 		data, err := c.Get(path, params)
 		if err != nil {
 			if w, ok := isSyncAccessWarning(err); ok {
@@ -358,7 +452,7 @@ func syncResource(c interface {
 				return syncResult{Resource: resource, Count: totalCount, Warn: fmt.Errorf("skipped %s: %s", resource, w.Reason), Duration: time.Since(started)}
 			}
 			if !humanFriendly {
-				fmt.Fprintf(os.Stdout, `{"event":"sync_error","resource":"%s","error":"%s"}`+"\n", resource, strings.ReplaceAll(err.Error(), `"`, `\"`))
+				fmt.Fprintln(os.Stdout, syncErrorJSON(resource, "", err))
 			}
 			return syncResult{Resource: resource, Count: totalCount, Err: fmt.Errorf("fetching %s: %w", resource, err), Duration: time.Since(started)}
 		}
@@ -368,10 +462,13 @@ func syncResource(c interface {
 		items, nextCursor, hasMore := extractPageItems(data, pageSize.cursorParam)
 
 		if len(items) == 0 {
+			if isEmptyPageResponse(data) {
+				break
+			}
 			// Single object response - try to store as-is
 			if err := upsertSingleObject(db, resource, data); err != nil {
 				if !humanFriendly {
-					fmt.Fprintf(os.Stdout, `{"event":"sync_error","resource":"%s","error":"%s"}`+"\n", resource, strings.ReplaceAll(err.Error(), `"`, `\"`))
+					fmt.Fprintln(os.Stdout, syncErrorJSON(resource, "", err))
 				}
 				return syncResult{Resource: resource, Err: err, Duration: time.Since(started)}
 			}
@@ -393,7 +490,7 @@ func syncResource(c interface {
 		stored, extractFailures, err := upsertResourceBatch(db, resource, items)
 		if err != nil {
 			if !humanFriendly {
-				fmt.Fprintf(os.Stdout, `{"event":"sync_error","resource":"%s","error":"%s"}`+"\n", resource, strings.ReplaceAll(err.Error(), `"`, `\"`))
+				fmt.Fprintln(os.Stdout, syncErrorJSON(resource, "", err))
 			}
 			return syncResult{Resource: resource, Count: totalCount, Err: fmt.Errorf("upserting batch for %s: %w", resource, err), Duration: time.Since(started)}
 		}
@@ -453,12 +550,18 @@ func syncResource(c interface {
 
 		pagesFetched++
 
-		// Enforce page ceiling to prevent runaway syncs on large-catalog APIs
+		// Enforce page ceiling to prevent runaway syncs on large-catalog APIs.
+		// Suppress the cap-hit warning when --latest-only is the cap source:
+		// the template pinned maxPages=1 by user intent, and emitting one
+		// warning per paginated resource would mask real sync_anomaly /
+		// sync_error output in the same stream.
 		if maxPages > 0 && pagesFetched >= maxPages {
-			if humanFriendly {
-				fmt.Fprintf(os.Stderr, "\n  %s: reached --max-pages limit (%d pages, %d items)\n", resource, maxPages, totalCount)
-			} else {
-				fmt.Fprintf(os.Stdout, `{"event":"sync_warning","resource":"%s","reason":"max_pages_cap_hit","message":"reached --max-pages cap of %d; data may be truncated. Re-run with --max-pages 0 (unlimited) or higher to verify."}`+"\n", resource, maxPages)
+			if !latestOnly {
+				if humanFriendly {
+					fmt.Fprintf(os.Stderr, "\n  %s: reached --max-pages limit (%d pages, %d items)\n", resource, maxPages, totalCount)
+				} else {
+					fmt.Fprintf(os.Stdout, `{"event":"sync_warning","resource":"%s","reason":"max_pages_cap_hit","message":"reached --max-pages cap of %d; data may be truncated. Re-run with --max-pages 0 (unlimited) or higher to verify."}`+"\n", resource, maxPages)
+				}
 			}
 			break
 		}
@@ -529,9 +632,16 @@ func determinePaginationDefaults() paginationDefaults {
 	}
 }
 
-// determineSinceParam returns the query parameter name for incremental sync filtering.
-func determineSinceParam() string {
-	return "since_id"
+// syncResourceSinceParam returns the query parameter name this resource's
+// list endpoint declares for incremental temporal filtering, or "" when the
+// endpoint declares none. Skipping the param for "" resources avoids
+// validation-error 400s on APIs that reject unknown query keys.
+func syncResourceSinceParam(resource string) string {
+	switch resource {
+	case "mailboxes_emails":
+		return "since_id"
+	}
+	return ""
 }
 
 // extractPageItems attempts to extract an array of items and pagination cursor from a response.
@@ -553,8 +663,7 @@ func extractPageItems(data json.RawMessage, cursorParam string) ([]json.RawMessa
 	}
 
 	// Try common item keys first (fast path)
-	itemKeys := []string{"data", "results", "items", "records", "nodes", "entries"}
-	for _, key := range itemKeys {
+	for _, key := range pageItemKeys {
 		if raw, ok := envelope[key]; ok {
 			if err := json.Unmarshal(raw, &items); err == nil && len(items) > 0 {
 				nextCursor, hasMore := extractPaginationFromEnvelope(envelope, cursorParam)
@@ -584,6 +693,40 @@ func extractPageItems(data json.RawMessage, cursorParam string) ([]json.RawMessa
 	}
 
 	return nil, "", false
+}
+
+func isEmptyPageResponse(data json.RawMessage) bool {
+	var direct []json.RawMessage
+	if err := json.Unmarshal(data, &direct); err == nil && !isJSONNull(data) {
+		return len(direct) == 0
+	}
+
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return false
+	}
+
+	for _, key := range pageItemKeys {
+		if raw, ok := envelope[key]; ok {
+			var items []json.RawMessage
+			if err := json.Unmarshal(raw, &items); err == nil && !isJSONNull(raw) {
+				return len(items) == 0
+			}
+		}
+	}
+
+	arrayCount := 0
+	for _, raw := range envelope {
+		var candidate []json.RawMessage
+		if err := json.Unmarshal(raw, &candidate); err == nil && len(candidate) == 0 && !isJSONNull(raw) {
+			arrayCount++
+		}
+	}
+	return arrayCount == 1
+}
+
+func isJSONNull(raw json.RawMessage) bool {
+	return strings.TrimSpace(string(raw)) == "null"
 }
 
 // extractPaginationFromEnvelope extracts cursor and has_more from a response envelope.
@@ -713,8 +856,7 @@ type discriminatorDispatch struct {
 	Values map[string]string
 }
 
-var discriminatorDispatchers = map[string]discriminatorDispatch{
-}
+var discriminatorDispatchers = map[string]discriminatorDispatch{}
 
 func upsertResourceBatch(db *store.Store, resource string, items []json.RawMessage) (int, int, error) {
 	if _, ok := discriminatorDispatchers[resource]; !ok {
@@ -782,6 +924,8 @@ func upsertSingleObject(db *store.Store, resource string, data json.RawMessage) 
 		return db.UpsertAccount(data)
 	case "admin":
 		return db.UpsertAdmin(data)
+	case "agent":
+		return db.UpsertAgent(data)
 	case "billing":
 		return db.UpsertBilling(data)
 	case "domains":
@@ -792,6 +936,8 @@ func upsertSingleObject(db *store.Store, resource string, data json.RawMessage) 
 		return db.UpsertNotSpam(data)
 	case "report_spam":
 		return db.UpsertReportSpam(data)
+	case "allowlist":
+		return db.UpsertAllowlist(data)
 	case "mailboxes_emails":
 		return db.UpsertMailboxesEmails(data)
 	case "reply":
@@ -806,10 +952,12 @@ func upsertSingleObject(db *store.Store, resource string, data json.RawMessage) 
 		return db.UpsertUpgrade(data)
 	case "operator":
 		return db.UpsertOperator(data)
-	case "slug_check":
+	case "slug-check":
 		return db.UpsertSlugCheck(data)
 	case "webhooks":
 		return db.UpsertWebhooks(data)
+	case "well-known":
+		return db.UpsertWellKnown(data)
 	default:
 		return db.Upsert(resource, id, data)
 	}
@@ -849,6 +997,7 @@ func defaultSyncResources() []string {
 		"account",
 		"api-keys",
 		"audit-log",
+		"auth-md",
 		"confirm",
 		"contacts",
 		"domains",
@@ -863,7 +1012,20 @@ func defaultSyncResources() []string {
 		"webhook-deliveries",
 		"webhooks",
 		"well-known",
+		"well-known-oauth-authorization-server",
+		"well-known-oauth-protected-resource",
 	}
+}
+
+// knownSyncResourceNames returns every resource name sync will accept —
+// flat resources plus any parent-child dependents. Used by --resource-param
+// validation to reject misspellings before they become silent no-ops.
+func knownSyncResourceNames() []string {
+	names := defaultSyncResources()
+	for _, dep := range dependentResourceDefs() {
+		names = append(names, dep.Name)
+	}
+	return names
 }
 
 // syncResourcePath maps resource names to their actual API endpoint paths.
@@ -871,23 +1033,26 @@ func defaultSyncResources() []string {
 // this preserves the actual endpoint path like "/ISteamApps/GetAppList/v2".
 func syncResourcePath(resource string) (string, error) {
 	paths := map[string]string{
-		"account": "/v1/account",
-		"api-keys": "/v1/api-keys",
-		"audit-log": "/v1/audit-log",
-		"confirm": "/v1/confirm",
-		"contacts": "/v1/contacts",
-		"domains": "/v1/domains",
-		"emails": "/v1/emails",
-		"mailboxes": "/v1/mailboxes",
-		"multimail-export": "/v1/export",
-		"multimail-health": "/health",
-		"operator": "/v1/operator/session",
-		"oversight": "/v1/oversight/pending",
-		"suppression": "/v1/suppression",
-		"usage": "/v1/usage",
-		"webhook-deliveries": "/v1/webhook-deliveries",
-		"webhooks": "/v1/webhooks",
-		"well-known": "/.well-known/multimail-signing-key",
+		"account":                               "/v1/account",
+		"api-keys":                              "/v1/api-keys",
+		"audit-log":                             "/v1/audit-log",
+		"auth-md":                               "/auth.md",
+		"confirm":                               "/v1/confirm",
+		"contacts":                              "/v1/contacts",
+		"domains":                               "/v1/domains",
+		"emails":                                "/v1/emails",
+		"mailboxes":                             "/v1/mailboxes",
+		"multimail-export":                      "/v1/export",
+		"multimail-health":                      "/health",
+		"operator":                              "/v1/operator/session",
+		"oversight":                             "/v1/oversight/pending",
+		"suppression":                           "/v1/suppression",
+		"usage":                                 "/v1/usage",
+		"webhook-deliveries":                    "/v1/webhook-deliveries",
+		"webhooks":                              "/v1/webhooks",
+		"well-known":                            "/.well-known/multimail-signing-key",
+		"well-known-oauth-authorization-server": "/.well-known/oauth-authorization-server",
+		"well-known-oauth-protected-resource":   "/.well-known/oauth-protected-resource",
 	}
 	if p, ok := paths[resource]; ok {
 		return p, nil
@@ -896,27 +1061,42 @@ func syncResourcePath(resource string) (string, error) {
 }
 
 // dependentResourceDef describes a child resource that requires iterating parent IDs to sync.
+// When KeyField is non-empty, the dependent's parent IDs are extracted from the parent
+// records' KeyField via json_extract rather than from the parent table's primary key.
+// Populated from a spec-declared walker (Endpoint.Walker.KeyField in internal YAML,
+// or `key_field` under `x-pp-sync-walker` in OpenAPI). Empty KeyField preserves the
+// existing parent-primary-key flow byte-for-byte.
 type dependentResourceDef struct {
 	Name          string
 	ParentTable   string
 	ParentIDParam string
 	PathTemplate  string
+	KeyField      string
 }
 
 func dependentResourceDefs() []dependentResourceDef {
 	return []dependentResourceDef{
-		{Name: "mailboxes_emails", ParentTable: "mailboxes", ParentIDParam: "mailboxId", PathTemplate: "/v1/mailboxes/{mailboxId}/emails"},
+		{Name: "mailboxes_emails", ParentTable: "mailboxes", ParentIDParam: "mailboxId", PathTemplate: "/v1/mailboxes/{mailboxId}/emails", KeyField: ""},
 	}
 }
 
 // syncDependentResources iterates parent tables and syncs child resources per parent ID.
+// parentFilter mirrors the user's --resources flag (empty = sync everything). A dependent
+// runs when its parent table or its own name appears in the filter.
 func syncDependentResources(c interface {
 	Get(string, map[string]string) (json.RawMessage, error)
 	RateLimit() float64
-}, db *store.Store, sinceTS string, full bool, maxPages int) []syncResult {
+}, db *store.Store, sinceTS string, full bool, maxPages int, latestOnly bool, parentFilter []string, userParams *syncUserParams) []syncResult {
+	allow := make(map[string]bool, len(parentFilter))
+	for _, r := range parentFilter {
+		allow[r] = true
+	}
 	var results []syncResult
 	for _, dep := range dependentResourceDefs() {
-		res := syncDependentResource(c, db, dep, sinceTS, full, maxPages)
+		if len(allow) > 0 && !allow[dep.ParentTable] && !allow[dep.Name] {
+			continue
+		}
+		res := syncDependentResource(c, db, dep, sinceTS, full, maxPages, latestOnly, userParams)
 		results = append(results, res)
 	}
 	return results
@@ -926,11 +1106,22 @@ func syncDependentResources(c interface {
 func syncDependentResource(c interface {
 	Get(string, map[string]string) (json.RawMessage, error)
 	RateLimit() float64
-}, db *store.Store, dep dependentResourceDef, sinceTS string, full bool, maxPages int) syncResult {
+}, db *store.Store, dep dependentResourceDef, sinceTS string, full bool, maxPages int, latestOnly bool, userParams *syncUserParams) syncResult {
 	started := time.Now()
 
-	// Query parent table for all IDs
-	parentIDs, err := db.ListIDs(dep.ParentTable)
+	// Query parent table for the keys to substitute into the child path.
+	// When KeyField is empty, use the parent's primary key via ListIDs
+	// (the original flat parent-child flow). When KeyField is set, the
+	// spec declared a walker that extracts a non-PK field from each parent
+	// record — ListField looks up the field in the parent's typed column
+	// if present, otherwise json_extract from the generic resources table.
+	var parentIDs []string
+	var err error
+	if dep.KeyField != "" {
+		parentIDs, err = db.ListField(dep.ParentTable, dep.KeyField)
+	} else {
+		parentIDs, err = db.ListIDs(dep.ParentTable)
+	}
 	if err != nil || len(parentIDs) == 0 {
 		if len(parentIDs) == 0 {
 			if humanFriendly {
@@ -949,6 +1140,16 @@ func syncDependentResource(c interface {
 	var deniedParents int
 	var firstDenial *accessWarning
 	pageSize := determinePaginationDefaults()
+	depSinceParam := syncResourceSinceParam(dep.Name)
+	depSinceTS := sinceTS
+	if depSinceTS != "" && depSinceParam == "" {
+		if humanFriendly {
+			fmt.Fprintf(os.Stderr, "  %s: incremental sync ignored (endpoint declares no temporal filter; falling back to full pagination)\n", dep.Name)
+		} else {
+			fmt.Fprintf(os.Stdout, `{"event":"sync_warning","resource":"%s","reason":"resource_not_incremental","message":"endpoint does not declare a temporal filter parameter; incremental sync has no effect for this resource"}`+"\n", dep.Name)
+		}
+		depSinceTS = ""
+	}
 	// Per-resource extract-failure tracking for the F4b symptom probe and
 	// per-item primary_key_unresolved warning. See syncResource for the
 	// concurrency rationale (one goroutine per resource → no race).
@@ -974,9 +1175,12 @@ func syncDependentResource(c interface {
 			if cursor != "" {
 				params[pageSize.cursorParam] = cursor
 			}
-			if sinceTS != "" {
-				params[determineSinceParam()] = sinceTS
+			if depSinceTS != "" {
+				params[depSinceParam] = depSinceTS
 			}
+
+			// Apply user flags last so they win over spec-derived cursor/since/limit.
+			userParams.applyTo(dep.Name, params)
 
 			data, err := c.Get(path, params)
 			if err != nil {
@@ -996,6 +1200,11 @@ func syncDependentResource(c interface {
 					}
 				} else if humanFriendly {
 					fmt.Fprintf(os.Stderr, "\n  %s: error for parent %s: %v\n", dep.Name, parentID, err)
+				} else {
+					// Non-warning failures were previously silent in JSON mode —
+					// operators only saw the missing rows. Emit a structured
+					// sync_error so the API body and status are inspectable.
+					fmt.Fprintln(os.Stdout, syncErrorJSON(dep.Name, parentID, err))
 				}
 				break
 			}
@@ -1051,10 +1260,12 @@ func syncDependentResource(c interface {
 			pagesFetched++
 
 			if maxPages > 0 && pagesFetched >= maxPages {
-				if humanFriendly {
-					fmt.Fprintf(os.Stderr, "\n  %s: reached --max-pages limit (%d pages, %d items) for parent %s\n", dep.Name, maxPages, totalCount, parentID)
-				} else {
-					fmt.Fprintf(os.Stdout, `{"event":"sync_warning","resource":"%s","parent":"%s","reason":"max_pages_cap_hit","message":"reached --max-pages cap of %d; data may be truncated. Re-run with --max-pages 0 (unlimited) or higher to verify."}`+"\n", dep.Name, parentID, maxPages)
+				if !latestOnly {
+					if humanFriendly {
+						fmt.Fprintf(os.Stderr, "\n  %s: reached --max-pages limit (%d pages, %d items) for parent %s\n", dep.Name, maxPages, totalCount, parentID)
+					} else {
+						fmt.Fprintf(os.Stdout, `{"event":"sync_warning","resource":"%s","parent":"%s","reason":"max_pages_cap_hit","message":"reached --max-pages cap of %d; data may be truncated. Re-run with --max-pages 0 (unlimited) or higher to verify."}`+"\n", dep.Name, parentID, maxPages)
+					}
 				}
 				break
 			}
@@ -1119,24 +1330,26 @@ func syncDependentResource(c interface {
 // annotations on a child path-item are honored at runtime, not just on
 // flat paths.
 var resourceIDFieldOverrides = map[string]string{
-	"account": "id",
-	"api-keys": "id",
-	"audit-log": "id",
-	"contacts": "id",
-	"domains": "id",
-	"emails": "id",
-	"mailboxes": "id",
-	"mailboxes_emails": "id",
-	"oversight": "id",
-	"suppression": "id",
+	"account":            "id",
+	"api-keys":           "id",
+	"audit-log":          "id",
+	"contacts":           "id",
+	"domains":            "id",
+	"emails":             "id",
+	"mailboxes":          "id",
+	"mailboxes_emails":   "id",
+	"oversight":          "id",
+	"suppression":        "id",
 	"webhook-deliveries": "id",
-	"webhooks": "id",
+	"webhooks":           "id",
 }
 
 // genericIDFieldFallbacks is the runtime safety net for resources that did
 // NOT receive a templated IDField. API-specific names belong in spec
 // annotations (x-resource-id), not this list.
 var genericIDFieldFallbacks = []string{"id", "ID", "name", "uuid", "slug", "key", "code", "uid"}
+
+var pageItemKeys = []string{"data", "results", "items", "records", "nodes", "entries"}
 
 // criticalResources is the template-time projection of per-resource Critical
 // (set by the profiler from the spec's path-item x-critical extension). It
@@ -1146,8 +1359,7 @@ var genericIDFieldFallbacks = []string{"id", "ID", "name", "uuid", "slug", "key"
 // Includes both flat resources and dependent (parent-child) resources so a
 // failed child sync flagged x-critical: true exits non-zero just like a
 // flat-resource critical failure.
-var criticalResources = map[string]bool{
-}
+var criticalResources = map[string]bool{}
 
 // extractID resolves an item's primary-key field. It consults the
 // per-resource templated override first; on miss, it falls through to the

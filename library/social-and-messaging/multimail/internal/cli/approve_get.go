@@ -14,9 +14,9 @@ import (
 func newApproveGetCmd(flags *rootFlags) *cobra.Command {
 
 	cmd := &cobra.Command{
-		Use:   "get <token>",
-		Short: "Render hosted approval page for oversight decisions",
-		Example: "  multimail-pp-cli approve get your-token-here",
+		Use:         "get <token>",
+		Short:       "Render hosted approval page for oversight decisions",
+		Example:     "  multimail-pp-cli approve get your-token-here",
 		Annotations: map[string]string{"pp:endpoint": "approve.get", "pp:method": "GET", "pp:path": "/v1/approve/{token}", "mcp:read-only": "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -42,8 +42,10 @@ func newApproveGetCmd(flags *rootFlags) *cobra.Command {
 			}
 			// For JSON output, wrap with provenance envelope before passing through flags.
 			// --select wins over --compact when both are set; --compact only runs when
-			// no explicit fields were requested.
-			if flags.asJSON || !isTerminal(cmd.OutOrStdout()) {
+			// no explicit fields were requested. Explicit format flags (--csv, --quiet,
+			// --plain) opt out of the auto-JSON path so piped consumers that asked for
+			// a non-JSON format reach the standard pipeline below.
+			if flags.asJSON || (!isTerminal(cmd.OutOrStdout()) && !flags.csv && !flags.quiet && !flags.plain) {
 				filtered := data
 				if flags.selectFields != "" {
 					filtered = filterFields(filtered, flags.selectFields)

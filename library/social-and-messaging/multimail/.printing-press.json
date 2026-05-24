@@ -1,20 +1,19 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-09T18:09:29.310416Z",
-  "printing_press_version": "4.2.0",
+  "generated_at": "2026-05-24T00:36:03.938096Z",
+  "printing_press_version": "4.4.0",
   "api_name": "multimail",
   "display_name": "Multimail",
   "cli_name": "multimail-pp-cli",
   "owner": "h179922",
-  "printer": "H179922",
   "printer_name": "H179922",
-  "spec_path": "/tmp/multimail-openapi.json",
+  "spec_path": "/tmp/multimail-openapi-2026-05-23.json",
   "spec_format": "openapi3",
-  "spec_checksum": "sha256:1ef613e9984cecb7aed2292701ba4f4a7733ed36cd23e81df7708c92cd430e31",
-  "run_id": "20260507-194146",
+  "spec_checksum": "sha256:80b0206722cfc2465c19806cedb8f0f1e55f354115f15d22f44e43590696110c",
+  "run_id": "20260523-201101",
   "category": "social-and-messaging",
   "mcp_binary": "multimail-pp-mcp",
-  "mcp_tool_count": 77,
+  "mcp_tool_count": 86,
   "mcp_ready": "full",
   "api_version": "2.0.0",
   "auth_type": "bearer_token",
@@ -23,44 +22,34 @@
   ],
   "novel_features": [
     {
-      "name": "Inbox health composite score",
-      "command": "mm health",
-      "description": "Compute a 0-100 inbox health score from local SQLite, factoring in unread count, stale thread ratio, bounce rate, spam score, and quota utilization."
+      "name": "Cross-mailbox search",
+      "command": "search",
+      "description": "Full-text search across all synced mailboxes at once — find any email regardless of which mailbox received it."
     },
     {
-      "name": "Stale thread detection",
-      "command": "mm stale",
-      "description": "Scan synced mailboxes for threads with unanswered inbound messages older than a configurable threshold (default 48h)."
-    },
-    {
-      "name": "Oversight dashboard",
-      "command": "mm oversight summary",
-      "description": "Display a summary of pending oversight approvals across all mailboxes, grouped by direction and mailbox."
+      "name": "Oversight velocity",
+      "command": "oversight velocity",
+      "description": "See approval/rejection rates and median decision latency per mailbox across your entire fleet."
     },
     {
       "name": "Trust ladder status",
-      "command": "mm trust status",
-      "description": "Show the current trust ladder position for each mailbox with upgrade eligibility and operator approval flow status."
+      "command": "trust status",
+      "description": "Fleet-wide view of each mailbox's oversight mode, time-at-level, and upgrade history."
     },
     {
-      "name": "Quota forecast",
-      "command": "mm quota forecast",
-      "description": "Project email quota usage for the remainder of the billing period based on the current send rate."
+      "name": "Allowlist coverage",
+      "command": "mailboxes allowlist coverage",
+      "description": "See what percentage of recent recipients are covered by allowlist patterns vs gated."
     },
     {
-      "name": "Send analytics",
-      "command": "mm stats",
-      "description": "Display send/receive analytics for the current billing period from the /v1/usage endpoint."
+      "name": "Inbox health",
+      "command": "inbox health",
+      "description": "Per-mailbox health snapshot: unread count, oldest unread age, reply rate, and thread depth."
     },
     {
-      "name": "Offline email search",
-      "command": "mm search",
-      "description": "Full-text search across locally synced emails by subject, sender, or body content without making API calls."
-    },
-    {
-      "name": "Incremental sync",
-      "command": "mm sync",
-      "description": "Pull new and updated emails from the API into the local SQLite cache using cursor-based pagination."
+      "name": "Stale thread detection",
+      "command": "mailboxes threads stale",
+      "description": "List conversation threads with no reply in N days — surfaces dropped conversations."
     }
   ]
 }

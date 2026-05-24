@@ -39,7 +39,7 @@ func TestSchemaVersion_StampedOnFreshDB(t *testing.T) {
 // TestSchemaVersion_StampExistingZeroDB verifies the stamp-and-continue
 // rule for existing deployed databases. A DB that predates the gate has
 // user_version = 0; opening it with this binary should stamp the version
-// to 1 without touching any data.
+// to StoreSchemaVersion without touching any data.
 func TestSchemaVersion_StampExistingZeroDB(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "data.db")
 
@@ -254,6 +254,188 @@ func TestSchemaVersion_ReopenIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestResources_CompositeKeyPreservesOverlappingIDs(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data.db")
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.Upsert("biz", "shared", []byte(`{"kind":"biz","name":"Pinky restaurant"}`)); err != nil {
+		t.Fatalf("upsert biz: %v", err)
+	}
+	if err := s.Upsert("bookmark", "shared", []byte(`{"kind":"bookmark","note":"anniversary"}`)); err != nil {
+		t.Fatalf("upsert bookmark: %v", err)
+	}
+
+	biz, err := s.Get("biz", "shared")
+	if err != nil {
+		t.Fatalf("get biz: %v", err)
+	}
+	if string(biz) != `{"kind":"biz","name":"Pinky restaurant"}` {
+		t.Fatalf("biz payload = %s", biz)
+	}
+
+	bookmark, err := s.Get("bookmark", "shared")
+	if err != nil {
+		t.Fatalf("get bookmark: %v", err)
+	}
+	if string(bookmark) != `{"kind":"bookmark","note":"anniversary"}` {
+		t.Fatalf("bookmark payload = %s", bookmark)
+	}
+
+	var count int
+	if err := s.DB().QueryRow(`SELECT COUNT(*) FROM resources WHERE id = 'shared'`).Scan(&count); err != nil {
+		t.Fatalf("count overlapping rows: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("overlapping row count = %d, want 2", count)
+	}
+
+	matches, err := s.Search("restaurant", 10)
+	if err != nil {
+		t.Fatalf("search restaurant: %v", err)
+	}
+	if len(matches) != 1 || string(matches[0]) != `{"kind":"biz","name":"Pinky restaurant"}` {
+		t.Fatalf("restaurant search = %q, want only biz payload", matches)
+	}
+}
+
+// Callers detect missing rows via errors.Is(err, sql.ErrNoRows); present
+// rows return the JSON payload with a nil error.
+func TestGet_MissingRowReturnsErrNoRows(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data.db")
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+
+	data, err := s.Get("missing_type", "missing_id")
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("Get missing row err = %v, want sql.ErrNoRows", err)
+	}
+	if data != nil {
+		t.Fatalf("Get missing row data = %s, want nil", data)
+	}
+
+	if err := s.Upsert("present_type", "present_id", []byte(`{"ok":true}`)); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	got, err := s.Get("present_type", "present_id")
+	if err != nil {
+		t.Fatalf("Get present row: %v", err)
+	}
+	if string(got) != `{"ok":true}` {
+		t.Fatalf("Get present row data = %s, want {\"ok\":true}", got)
+	}
+}
+
+func TestMigrate_ResourcesCompositeKeyUpgrade(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data.db")
+
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE resources (
+		id TEXT PRIMARY KEY,
+		resource_type TEXT NOT NULL,
+		data JSON NOT NULL,
+		synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		raw.Close()
+		t.Fatalf("create v1 resources: %v", err)
+	}
+	if _, err := raw.Exec(`CREATE VIRTUAL TABLE resources_fts USING fts5(
+		id, resource_type, content, tokenize='porter unicode61'
+	)`); err != nil {
+		raw.Close()
+		t.Fatalf("create v1 resources_fts: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO resources (id, resource_type, data) VALUES ('shared', 'biz', '{"kind":"biz","name":"legacy restaurant"}')`); err != nil {
+		raw.Close()
+		t.Fatalf("insert v1 resource: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO resources_fts (rowid, id, resource_type, content) VALUES (1, 'shared', 'biz', '{"kind":"biz","name":"legacy restaurant"}')`); err != nil {
+		raw.Close()
+		t.Fatalf("insert v1 fts row: %v", err)
+	}
+	if _, err := raw.Exec(`PRAGMA user_version = 1`); err != nil {
+		raw.Close()
+		t.Fatalf("stamp v1: %v", err)
+	}
+	raw.Close()
+
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open upgraded db: %v", err)
+	}
+	defer s.Close()
+
+	v, err := s.SchemaVersion()
+	if err != nil {
+		t.Fatalf("read schema version: %v", err)
+	}
+	if v != StoreSchemaVersion {
+		t.Fatalf("upgraded version = %d, want %d", v, StoreSchemaVersion)
+	}
+
+	rows, err := s.DB().Query(`PRAGMA table_info(resources)`)
+	if err != nil {
+		t.Fatalf("table_info resources: %v", err)
+	}
+	defer rows.Close()
+
+	pk := map[string]int{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pkOrder int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pkOrder); err != nil {
+			t.Fatalf("scan table_info: %v", err)
+		}
+		pk[name] = pkOrder
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("table_info rows: %v", err)
+	}
+	if pk["resource_type"] != 1 || pk["id"] != 2 {
+		t.Fatalf("resources primary key order = resource_type:%d id:%d, want resource_type:1 id:2", pk["resource_type"], pk["id"])
+	}
+
+	if err := s.Upsert("bookmark", "shared", []byte(`{"kind":"bookmark","note":"after upgrade"}`)); err != nil {
+		t.Fatalf("upsert overlapping resource after upgrade: %v", err)
+	}
+
+	biz, err := s.Get("biz", "shared")
+	if err != nil {
+		t.Fatalf("get migrated biz: %v", err)
+	}
+	if string(biz) != `{"kind":"biz","name":"legacy restaurant"}` {
+		t.Fatalf("migrated biz payload = %s", biz)
+	}
+
+	bookmark, err := s.Get("bookmark", "shared")
+	if err != nil {
+		t.Fatalf("get upgraded bookmark: %v", err)
+	}
+	if string(bookmark) != `{"kind":"bookmark","note":"after upgrade"}` {
+		t.Fatalf("upgraded bookmark payload = %s", bookmark)
+	}
+
+	matches, err := s.Search("legacy", 10)
+	if err != nil {
+		t.Fatalf("search migrated fts: %v", err)
+	}
+	if len(matches) != 1 || string(matches[0]) != `{"kind":"biz","name":"legacy restaurant"}` {
+		t.Fatalf("legacy search = %q, want migrated biz payload", matches)
+	}
+}
+
 // TestOpenReadOnly_RejectsWrites pins the contract: direct and CTE-wrapped
 // writes against the main DB fail under mode=ro. Deliberately does not
 // assert VACUUM INTO and ATTACH DATABASE — modernc.org/sqlite allows both
@@ -446,6 +628,76 @@ func TestMigrate_AddsColumnsOnUpgrade_Admin(t *testing.T) {
 	} {
 		if !hasColumn[want] {
 			t.Fatalf("%s column missing from admin after migrate", want)
+		}
+	}
+}
+
+// TestMigrate_AddsColumnsOnUpgrade_Agent verifies that opening a
+// database created by an older binary succeeds and adds newly generated
+// columns before CREATE INDEX runs against the pre-existing table. Regression
+// coverage for parent_id upgrades and indexed generated columns.
+func TestMigrate_AddsColumnsOnUpgrade_Agent(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data.db")
+
+	// Pre-create the DB with the older table shape: id, data, synced_at and
+	// none of the newer generated columns. user_version stays 0 (pre-gate).
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE agent (
+		id TEXT PRIMARY KEY,
+		data JSON NOT NULL,
+		synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		raw.Close()
+		t.Fatalf("create old table: %v", err)
+	}
+	raw.Close()
+
+	// Opening with the new binary must run CREATE INDEX statements without
+	// erroring on missing generated columns.
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open upgraded db: %v", err)
+	}
+	defer s.Close()
+
+	// The migration must have added every generated column.
+	rows, err := s.DB().Query(`PRAGMA table_info(agent)`)
+	if err != nil {
+		t.Fatalf("table_info: %v", err)
+	}
+	defer rows.Close()
+
+	hasColumn := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		hasColumn[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+
+	for _, want := range []string{
+		"claim_token",
+		"claim_token_expires",
+		"claim_url",
+		"registration_id",
+		"registration_type",
+		"credential",
+		"credential_expires",
+		"credential_type",
+		"status",
+	} {
+		if !hasColumn[want] {
+			t.Fatalf("%s column missing from agent after migrate", want)
 		}
 	}
 }
@@ -768,6 +1020,68 @@ func TestMigrate_AddsColumnsOnUpgrade_ReportSpam(t *testing.T) {
 	} {
 		if !hasColumn[want] {
 			t.Fatalf("%s column missing from report_spam after migrate", want)
+		}
+	}
+}
+
+// TestMigrate_AddsColumnsOnUpgrade_Allowlist verifies that opening a
+// database created by an older binary succeeds and adds newly generated
+// columns before CREATE INDEX runs against the pre-existing table. Regression
+// coverage for parent_id upgrades and indexed generated columns.
+func TestMigrate_AddsColumnsOnUpgrade_Allowlist(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data.db")
+
+	// Pre-create the DB with the older table shape: id, data, synced_at and
+	// none of the newer generated columns. user_version stays 0 (pre-gate).
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE allowlist (
+		id TEXT PRIMARY KEY,
+		data JSON NOT NULL,
+		synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		raw.Close()
+		t.Fatalf("create old table: %v", err)
+	}
+	raw.Close()
+
+	// Opening with the new binary must run CREATE INDEX statements without
+	// erroring on missing generated columns.
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open upgraded db: %v", err)
+	}
+	defer s.Close()
+
+	// The migration must have added every generated column.
+	rows, err := s.DB().Query(`PRAGMA table_info(allowlist)`)
+	if err != nil {
+		t.Fatalf("table_info: %v", err)
+	}
+	defer rows.Close()
+
+	hasColumn := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		hasColumn[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+
+	for _, want := range []string{
+		"mailboxes_id",
+	} {
+		if !hasColumn[want] {
+			t.Fatalf("%s column missing from allowlist after migrate", want)
 		}
 	}
 }
@@ -1335,6 +1649,72 @@ func TestMigrate_AddsColumnsOnUpgrade_Webhooks(t *testing.T) {
 	} {
 		if !hasColumn[want] {
 			t.Fatalf("%s column missing from webhooks after migrate", want)
+		}
+	}
+}
+
+// TestMigrate_AddsColumnsOnUpgrade_WellKnown verifies that opening a
+// database created by an older binary succeeds and adds newly generated
+// columns before CREATE INDEX runs against the pre-existing table. Regression
+// coverage for parent_id upgrades and indexed generated columns.
+func TestMigrate_AddsColumnsOnUpgrade_WellKnown(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "data.db")
+
+	// Pre-create the DB with the older table shape: id, data, synced_at and
+	// none of the newer generated columns. user_version stays 0 (pre-gate).
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE well_known (
+		id TEXT PRIMARY KEY,
+		data JSON NOT NULL,
+		synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		raw.Close()
+		t.Fatalf("create old table: %v", err)
+	}
+	raw.Close()
+
+	// Opening with the new binary must run CREATE INDEX statements without
+	// erroring on missing generated columns.
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open upgraded db: %v", err)
+	}
+	defer s.Close()
+
+	// The migration must have added every generated column.
+	rows, err := s.DB().Query(`PRAGMA table_info(well_known)`)
+	if err != nil {
+		t.Fatalf("table_info: %v", err)
+	}
+	defer rows.Close()
+
+	hasColumn := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		hasColumn[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+
+	for _, want := range []string{
+		"issuer",
+		"resource",
+		"resource_documentation",
+		"resource_logo_uri",
+		"resource_name",
+	} {
+		if !hasColumn[want] {
+			t.Fatalf("%s column missing from well_known after migrate", want)
 		}
 	}
 }
