@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mvanhorn/printing-press-library/library/health/ofa/internal/cliutil"
 	"github.com/mvanhorn/printing-press-library/library/health/ofa/internal/ofa"
 )
 
@@ -66,9 +67,10 @@ func printDogHuman(cmd *cobra.Command, d ofa.Dog) error {
 	if d.CHIC {
 		chic = "  [CHIC]"
 	}
-	fmt.Fprintf(w, "%s%s\n%s  %s %s %s  born %s\n", d.Name, chic, d.Registration, d.Sex, d.Color, d.Breed, d.Born)
+	sc := cliutil.ScrubTerminal
+	fmt.Fprintf(w, "%s%s\n%s  %s %s %s  born %s\n", sc(d.Name), chic, sc(d.Registration), sc(d.Sex), sc(d.Color), sc(d.Breed), sc(d.Born))
 	if d.Sire != "" || d.Dam != "" {
-		fmt.Fprintf(w, "Sire: %s   Dam: %s\n", orDash(d.Sire), orDash(d.Dam))
+		fmt.Fprintf(w, "Sire: %s   Dam: %s\n", sc(orDash(d.Sire)), sc(orDash(d.Dam)))
 	}
 	fmt.Fprintln(w)
 	if len(d.Tests) == 0 {
@@ -81,7 +83,7 @@ func printDogHuman(cmd *cobra.Command, d ofa.Dog) error {
 				expired = "EXPIRED"
 			}
 			rows = append(rows, map[string]any{"registry": t.Registry, "conclusion": t.Conclusion,
-				"report_date": t.ReportDate, "ofa_number": t.OFANumber, "expired": expired})
+				"test_date": t.TestDate, "report_date": t.ReportDate, "ofa_number": t.OFANumber, "expired": expired})
 		}
 		if err := printAutoTable(w, rows); err != nil {
 			return err

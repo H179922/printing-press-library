@@ -11,7 +11,7 @@
   "auth_context": {
     "type": "none"
   },
-  "source_fingerprint": "11bbc1dcdbee7c3fd12fedce8487ddf40d589839888251716bbce7cdfd6f60c5",
+  "source_fingerprint": "88ec1805a4fd9f363afb88aa6d62689558c69256f19643454dbd5d8a594c4efc",
   "source_files": {
     "cmd/ofa-pp-cli/main.go": "97285bffc4efcdeba6c03615ea6c9e24a8dcb4de01099b5cbc142077954fad85",
     "cmd/ofa-pp-mcp/http_auth_test.go": "28055d449b1bd6942dfac3ecb06fb435fff84015cff7553311a933df14173afd",
@@ -27,7 +27,7 @@
     "internal/cli/deliver.go": "ed06a100c34c15ef01c570ea354030ac02f4f3f16d9798270af6ec4e534247e4",
     "internal/cli/deliver_download_test.go": "39cb3c596901fe2c55c28315f56338cffefe7c398a19dc895883be7c58b35557",
     "internal/cli/doctor.go": "57a310106c1a920e90c010f52a56b0afda86a858ea387a58e47791591e5c7529",
-    "internal/cli/dog.go": "ca4cfa7d091c0af66924dcf9c131140ce4b9b080343543588fedbfa3a6310dcd",
+    "internal/cli/dog.go": "3dde64dc47381b0268f8e19910579090072e7e044b4337e8286052eff45072ba",
     "internal/cli/feedback.go": "daaf1bbbee35894c340e765dacf95672148a865f63321e1e71d8c337be237fa2",
     "internal/cli/helpers.go": "cb1cde94821254e7a65c82e5d4184785745bd6838a73075da65d8e132ad0649f",
     "internal/cli/html_extract.go": "11153801fcf2bdd036475b76f3080d5ef3975e2638b472ea35dd4472037a12a1",
@@ -145,12 +145,12 @@
     "internal/mcp/platform_gate_test.go": "968868740193e3cb2c7a938f19325234a06fb86100907a13afcc0f9f9876544d",
     "internal/mcp/recipe_intents_test.go": "e495f4721ebe8935fc4bf33f414f45b5aab520a8f42a9301cbb60b62ef78d869",
     "internal/mcp/tools.go": "0d5626c80c46fb2e46ba85b6fe9ab115c1e2fec9ef2a433b189ead8ff66147b8",
-    "internal/ofa/dog.go": "99ac88ec7530dda44a5b7f254c52c2f708bfc606ff7d068aa700a0e585a528d8",
+    "internal/ofa/dog.go": "0bc4da4038f654d74cc2c90eb133122b4becb054ca4a0c8e1019463695bce280",
     "internal/ofa/grade.go": "e3a3a353b39e7f2921808f1690f27a158333eb282c7a9e58edda52e7748156d3",
     "internal/ofa/kennel.go": "22ddbcd123048058cde0692f08dda86843f0a1d2339d26a023d44f97e6e081a9",
     "internal/ofa/lookups.go": "c35109b32f8587e0d270e7061ca95692b02f79638c567e192ef915c3fc695fe1",
-    "internal/ofa/parse.go": "de37c92ff6ccb64c2c4d2f1cb6fb77f7d92a296f6334bca699743327555a8c0c",
-    "internal/ofa/parse_test.go": "af4b0def8b07963896d709b0b28ba2467840a7a293227751b919b9b749d9d999",
+    "internal/ofa/parse.go": "ab87cf9c77d5bf414000445bb5cd2d2f2f78b41459b0ad5bbafb47e4199cbbde",
+    "internal/ofa/parse_test.go": "4e9ea80f3167c841e208569dfdd7c25014bdcb8268fd2650f306c23d9155c024",
     "internal/ofa/query.go": "2600312d09ea4e22404705a6eca63a60ecb233b2efb24ec5f08ccb100d14d834",
     "internal/ofa/query_test.go": "68df18405061e43d9d399325eafadda0e02fb7eadaf4e24a98f1260383b22935",
     "internal/ofa/rollup_test.go": "0dbc352b1431b869b7da5b8551f540b87013ae6a6ede4192e2f9621767be3618",

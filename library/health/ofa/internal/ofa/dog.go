@@ -92,7 +92,11 @@ func ParseDog(body []byte, appnum string) (Dog, error) {
 		return Dog{}, err
 	}
 	d.Tests = tests
-	d.Relatives = parseRelatives(s)
+	rel, err := parseRelatives(s)
+	if err != nil {
+		return Dog{}, err
+	}
+	d.Relatives = rel
 	return d, nil
 }
 
@@ -190,9 +194,15 @@ func parseDetailTests(s string) ([]TestResult, error) {
 	return out, nil
 }
 
-func parseRelatives(s string) []Relative {
+// parseRelatives reads the relatives table. Every relatives row that opens
+// must close; a cut-off table is an error rather than a shorter list.
+func parseRelatives(s string) ([]Relative, error) {
 	var out []Relative
-	for _, m := range relativeRowRe.FindAllStringSubmatch(s, -1) {
+	matches := relativeRowRe.FindAllStringSubmatch(s, -1)
+	if opened := strings.Count(s, "<tr class='as_relatives_row'"); opened != len(matches) {
+		return nil, &UnexpectedResponseError{Snippet: fmt.Sprintf("relatives table cut off: %d rows opened, %d closed", opened, len(matches))}
+	}
+	for _, m := range matches {
 		cells := cellTexts(m[1])
 		if len(cells) < 6 {
 			continue
@@ -212,5 +222,5 @@ func parseRelatives(s string) []Relative {
 		}
 		out = append(out, r)
 	}
-	return out
+	return out, nil
 }

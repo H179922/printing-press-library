@@ -118,19 +118,22 @@ func TestParseResultsThousandsSeparator(t *testing.T) {
 
 func TestValidatePage(t *testing.T) {
 	rows := func(n int) []Row { return make([]Row, n) }
-	first := Page{Total: 25, PageCount: 2, Rows: rows(20)}
+	first := Page{Total: 25, Number: 1, PageCount: 2, Rows: rows(20)}
 	var ue *UnexpectedResponseError
 	if err := ValidatePage(first, 1, first); err != nil {
 		t.Errorf("valid page 1: %v", err)
 	}
-	if err := ValidatePage(first, 2, Page{Total: 25, PageCount: 2, Rows: rows(5)}); err != nil {
+	if err := ValidatePage(first, 2, Page{Total: 25, Number: 2, PageCount: 2, Rows: rows(5)}); err != nil {
 		t.Errorf("valid page 2: %v", err)
 	}
 	if err := ValidatePage(first, 2, Page{}); !errors.As(err, &ue) {
 		t.Errorf("later 'No matches found' page must error, got %v", err)
 	}
-	if err := ValidatePage(first, 2, Page{Total: 25, PageCount: 2, Rows: rows(4)}); !errors.As(err, &ue) {
+	if err := ValidatePage(first, 2, Page{Total: 25, Number: 2, PageCount: 2, Rows: rows(4)}); !errors.As(err, &ue) {
 		t.Errorf("short final page must error, got %v", err)
+	}
+	if err := ValidatePage(Page{Total: 40, Number: 1, PageCount: 2, Rows: rows(20)}, 2, Page{Total: 40, Number: 1, PageCount: 2, Rows: rows(20)}); !errors.As(err, &ue) {
+		t.Errorf("replayed page 1 served for page 2 must error, got %v", err)
 	}
 	if err := ValidatePage(Page{}, 1, Page{}); err != nil {
 		t.Errorf("no-match query is valid: %v", err)
@@ -194,6 +197,10 @@ func TestParseDogRejectsDroppedConclusions(t *testing.T) {
 	beforeTests := dogFixture[:strings.Index(dogFixture, "<table id='as_detail_tests'>")]
 	if _, err := ParseDog([]byte(beforeTests), "1000003"); !errors.As(err, &ue) {
 		t.Errorf("body cut before the tests table must error, not return no tests: %v", err)
+	}
+	cutRelatives := dogFixture[:strings.Index(dogFixture, "<td>Littermate</td>")]
+	if _, err := ParseDog([]byte(cutRelatives), "1000003"); !errors.As(err, &ue) {
+		t.Errorf("cut-off relatives table must error, got %v", err)
 	}
 	noClose := strings.Replace(dogFixture, "</tbody></table><div id='as_detail_tools2'>", "</tbody><div id='as_detail_tools2'>", 1)
 	if _, err := ParseDog([]byte(noClose), "1000003"); !errors.As(err, &ue) {

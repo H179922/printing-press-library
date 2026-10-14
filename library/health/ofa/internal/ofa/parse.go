@@ -33,11 +33,12 @@ type Row struct {
 type Page struct {
 	Rows      []Row
 	Total     int // "N matches." header; 0 when nothing matched
+	Number    int // page number the response says it is
 	PageCount int // pages available for this query
 }
 
 var (
-	headerRe   = regexp.MustCompile(`([\d,]+) matches\.\s+Page \d+ of <span id='api_page_count'>(\d+)</span>`)
+	headerRe   = regexp.MustCompile(`([\d,]+) matches\.\s+Page (\d+) of <span id='api_page_count'>(\d+)</span>`)
 	tagRe      = regexp.MustCompile(`<[^>]*>`)
 	spaceRe    = regexp.MustCompile(`\s+`)
 	appnumRe   = regexp.MustCompile(`data-appnum='(\d+)'`)
@@ -67,6 +68,9 @@ func ValidatePage(first Page, page int, p Page) error {
 	if page > 1 && (p.Total != first.Total || p.PageCount != first.PageCount) {
 		return &UnexpectedResponseError{Snippet: fmt.Sprintf("page %d reports %d matches over %d pages; page 1 reported %d over %d", page, p.Total, p.PageCount, first.Total, first.PageCount)}
 	}
+	if p.Total > 0 && p.Number != page {
+		return &UnexpectedResponseError{Snippet: fmt.Sprintf("requested page %d but the response is page %d", page, p.Number)}
+	}
 	if first.Total > 0 {
 		if want := ExpectedRows(first.Total, page, first.PageCount); len(p.Rows) != want {
 			return &UnexpectedResponseError{Snippet: fmt.Sprintf("page %d of %d (%d matches) returned %d rows, want %d", page, first.PageCount, first.Total, len(p.Rows), want)}
@@ -89,8 +93,9 @@ func ParseResults(body []byte) (Page, error) {
 		return Page{}, &UnexpectedResponseError{Snippet: snippet(s)}
 	}
 	total, _ := strconv.Atoi(strings.ReplaceAll(m[1], ",", ""))
-	pages, _ := strconv.Atoi(m[2])
-	p := Page{Total: total, PageCount: pages}
+	number, _ := strconv.Atoi(m[2])
+	pages, _ := strconv.Atoi(m[3])
+	p := Page{Total: total, Number: number, PageCount: pages}
 	for _, seg := range strings.Split(s, "<tr class='as_results_row'")[1:] {
 		seg = cutAt(seg, "</table>")
 		cells := cellTexts(seg)
