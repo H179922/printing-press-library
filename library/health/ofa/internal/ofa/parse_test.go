@@ -108,6 +108,14 @@ func TestExpectedRows(t *testing.T) {
 	}
 }
 
+func TestParseResultsRejectsTruncatedFinalCell(t *testing.T) {
+	cut := resultsFixture[:strings.LastIndex(resultsFixture, "<td>HIPS")+len("<td>HI")]
+	var ue *UnexpectedResponseError
+	if _, err := ParseResults([]byte(cut)); !errors.As(err, &ue) {
+		t.Errorf("body cut inside the last cell must error, got %v", err)
+	}
+}
+
 func TestParseResultsThousandsSeparator(t *testing.T) {
 	row := "<tr class='as_results_row' data-appnum='1' data-chic='no'><td></td><td>FAKE ONE<td>XX1<td>AUSTRALIAN SHEPHERD<td>M<td> <td>Jan 1 2024<td>Feb 1 2026<td>25<td>AS-1G25M<td>HIPS</tbody></table>"
 	p, err := ParseResults([]byte("1,439 matches.  Page 1 of <span id='api_page_count'>72</span>" + row))
@@ -208,6 +216,10 @@ func TestParseDogRejectsDroppedConclusions(t *testing.T) {
 	unclosedTable := strings.TrimSuffix(dogFixture, "</table>")
 	if _, err := ParseDog([]byte(unclosedTable), "1000003"); !errors.As(err, &ue) {
 		t.Errorf("relatives table that never closes must error, got %v", err)
+	}
+	earlyClose := strings.Replace(dogFixture, "<td>Littermate</td>", "<td>Littermate</table></td>", 1)
+	if _, err := ParseDog([]byte(earlyClose), "1000003"); !errors.As(err, &ue) {
+		t.Errorf("relatives table closing inside its last row must error, got %v", err)
 	}
 	shortRow := strings.Replace(dogFixture, "<td>Littermate</td> <td>XX00000004</td> <td>Apr 5 2021 </td>", "", 1)
 	if _, err := ParseDog([]byte(shortRow), "1000003"); !errors.As(err, &ue) {

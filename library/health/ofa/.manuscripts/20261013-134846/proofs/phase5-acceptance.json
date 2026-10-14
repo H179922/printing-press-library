@@ -11,7 +11,7 @@
   "auth_context": {
     "type": "none"
   },
-  "source_fingerprint": "8da108a85a24b32a5af31273cd3e2ef8d170d0b8ba1326e9fae5cae189a60768",
+  "source_fingerprint": "433fa037e5474db40787ec306b80571da79de581d5158426ffe2d98051f46bcc",
   "source_files": {
     "cmd/ofa-pp-cli/main.go": "97285bffc4efcdeba6c03615ea6c9e24a8dcb4de01099b5cbc142077954fad85",
     "cmd/ofa-pp-mcp/http_auth_test.go": "28055d449b1bd6942dfac3ecb06fb435fff84015cff7553311a933df14173afd",
@@ -145,12 +145,12 @@
     "internal/mcp/platform_gate_test.go": "968868740193e3cb2c7a938f19325234a06fb86100907a13afcc0f9f9876544d",
     "internal/mcp/recipe_intents_test.go": "e495f4721ebe8935fc4bf33f414f45b5aab520a8f42a9301cbb60b62ef78d869",
     "internal/mcp/tools.go": "0d5626c80c46fb2e46ba85b6fe9ab115c1e2fec9ef2a433b189ead8ff66147b8",
-    "internal/ofa/dog.go": "8a750d1f4c4b852a12a2a14425d6e0098e52f2dbccfc5b808f1c726dcda788cb",
+    "internal/ofa/dog.go": "ac486a8d7ff9ba2d810d436b373774036d0d95b6ce08bd7aaa04435f491c2d8d",
     "internal/ofa/grade.go": "e3a3a353b39e7f2921808f1690f27a158333eb282c7a9e58edda52e7748156d3",
     "internal/ofa/kennel.go": "22ddbcd123048058cde0692f08dda86843f0a1d2339d26a023d44f97e6e081a9",
     "internal/ofa/lookups.go": "c35109b32f8587e0d270e7061ca95692b02f79638c567e192ef915c3fc695fe1",
-    "internal/ofa/parse.go": "ab87cf9c77d5bf414000445bb5cd2d2f2f78b41459b0ad5bbafb47e4199cbbde",
-    "internal/ofa/parse_test.go": "56d00e6b7d5bf48f3a85640e2a14d8a8dd991ff242847e633227f6370684eeb9",
+    "internal/ofa/parse.go": "b991cf27ba070683206fb03c4013757e3ab609e455b81791f30ca233ba76f65c",
+    "internal/ofa/parse_test.go": "25bf93a672a5b22a749229cd29caf2f806ef20a6a836e6dc92e33ecd48d789f0",
     "internal/ofa/query.go": "2600312d09ea4e22404705a6eca63a60ecb233b2efb24ec5f08ccb100d14d834",
     "internal/ofa/query_test.go": "68df18405061e43d9d399325eafadda0e02fb7eadaf4e24a98f1260383b22935",
     "internal/ofa/rollup_test.go": "0dbc352b1431b869b7da5b8551f540b87013ae6a6ede4192e2f9621767be3618",

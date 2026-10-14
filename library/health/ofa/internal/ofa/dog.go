@@ -214,11 +214,17 @@ func parseRelatives(s string) ([]Relative, error) {
 		return nil, &UnexpectedResponseError{Snippet: "incomplete detail response (relatives table missing)"}
 	}
 	end := strings.Index(s[start:], "</table>")
-	if end < 0 || start+end < strings.LastIndex(s, "<tr class='as_relatives_row'") {
-		return nil, &UnexpectedResponseError{Snippet: "relatives table does not close after its last row"}
+	if end < 0 {
+		return nil, &UnexpectedResponseError{Snippet: "relatives table does not close"}
 	}
-	matches := relativeRowRe.FindAllStringSubmatch(s, -1)
-	if opened := strings.Count(s, "<tr class='as_relatives_row'"); opened != len(matches) {
+	// Parse only inside the relatives table. A row opened after the table's
+	// first </table> means the table closed early (inside a row).
+	table := s[start : start+end]
+	if strings.Count(s[start:], "<tr class='as_relatives_row'") != strings.Count(table, "<tr class='as_relatives_row'") {
+		return nil, &UnexpectedResponseError{Snippet: "relatives table closes before its last row"}
+	}
+	matches := relativeRowRe.FindAllStringSubmatch(table, -1)
+	if opened := strings.Count(table, "<tr class='as_relatives_row'"); opened != len(matches) {
 		return nil, &UnexpectedResponseError{Snippet: fmt.Sprintf("relatives table cut off: %d rows opened, %d closed", opened, len(matches))}
 	}
 	for _, m := range matches {

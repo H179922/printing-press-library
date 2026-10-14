@@ -96,6 +96,12 @@ func ParseResults(body []byte) (Page, error) {
 	number, _ := strconv.Atoi(m[2])
 	pages, _ := strconv.Atoi(m[3])
 	p := Page{Total: total, Number: number, PageCount: pages}
+	// A complete result fragment closes its table after the last row; a body
+	// cut inside the final cell (e.g. "<td>HI") would otherwise still count as
+	// a full row with a truncated value.
+	if last := strings.LastIndex(s, "<tr class='as_results_row'"); last >= 0 && !strings.Contains(s[last:], "</table>") {
+		return Page{}, &UnexpectedResponseError{Snippet: "result table does not close after its last row (truncated response)"}
+	}
 	for _, seg := range strings.Split(s, "<tr class='as_results_row'")[1:] {
 		seg = cutAt(seg, "</table>")
 		cells := cellTexts(seg)
