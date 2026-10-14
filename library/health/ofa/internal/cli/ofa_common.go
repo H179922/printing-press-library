@@ -137,14 +137,17 @@ func fetchRows(ctx context.Context, c *client.Client, q ofa.Query, maxPages int,
 		for page := 1; page <= maxPages; page++ {
 			body, status, err := c.PostQueryFormWithParams(ctx, ofa.SearchPath, nil, ofa.WithPage(form.Fields, page))
 			if err != nil {
-				return rows, meta, apiErr(fmt.Errorf("OFA search (%s page %d): %w", labelOr(form.Label), page, err))
+				return rows, meta, classifyAPIErrorOnly(fmt.Errorf("OFA search (%s page %d): %w", labelOr(form.Label), page, err))
 			}
 			if status >= 400 {
-				return rows, meta, apiErr(fmt.Errorf("OFA search (%s page %d): HTTP %d", labelOr(form.Label), page, status))
+				return rows, meta, classifyAPIErrorOnly(fmt.Errorf("OFA search (%s page %d): HTTP %d", labelOr(form.Label), page, status))
 			}
 			p, err := ofa.ParseResults(body)
 			if err != nil {
 				return rows, meta, apiErr(err)
+			}
+			if page < p.PageCount && len(p.Rows) < ofa.ResultsPageSize {
+				return rows, meta, apiErr(fmt.Errorf("OFA search (%s page %d of %d) returned %d rows, want %d: incomplete page", labelOr(form.Label), page, p.PageCount, len(p.Rows), ofa.ResultsPageSize))
 			}
 			meta.ScannedPages++
 			if page == 1 {

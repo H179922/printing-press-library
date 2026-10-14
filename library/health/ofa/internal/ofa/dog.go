@@ -66,7 +66,14 @@ func ParseDog(body []byte, appnum string) (Dog, error) {
 	s := string(body)
 	name := detailNameRe.FindStringSubmatch(s)
 	if name == nil {
-		return Dog{}, ErrDogNotFound
+		// Only the rendered detail shell without a name is a missing record.
+		// Empty bodies, backend SQL errors (OFA's per-IP lookup throttle
+		// answers some appnums with a raw SQL Server error), and unknown
+		// pages are unexpected responses, not "not found".
+		if strings.Contains(s, "id='as_detail_full'") {
+			return Dog{}, ErrDogNotFound
+		}
+		return Dog{}, &UnexpectedResponseError{Snippet: snippet(s)}
 	}
 	d := Dog{AppNum: appnum, Name: CleanText(name[1])}
 	if c := detailCHICRe.FindStringSubmatch(s); c != nil {

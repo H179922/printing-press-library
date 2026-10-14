@@ -83,8 +83,22 @@ func TestParseResultsNoMatchesAndGarbage(t *testing.T) {
 	}
 }
 
+func TestParseResultsRejectsSilentRowLoss(t *testing.T) {
+	malformed := "2 matches.  Page 1 of <span id='api_page_count'>1</span>" +
+		"<tr class='as_results_row' data-appnum='1' data-chic='no'><td></td><td>ONLY NAME<td>XX1</tbody></table>"
+	var ue *UnexpectedResponseError
+	if _, err := ParseResults([]byte(malformed)); !errors.As(err, &ue) {
+		t.Errorf("row with too few cells must error, got %v", err)
+	}
+	noRows := "5 matches.  Page 1 of <span id='api_page_count'>1</span><table id='as_results'></table>"
+	if _, err := ParseResults([]byte(noRows)); !errors.As(err, &ue) {
+		t.Errorf("matches header with zero rows must error, got %v", err)
+	}
+}
+
 func TestParseResultsThousandsSeparator(t *testing.T) {
-	p, err := ParseResults([]byte("1,439 matches.  Page 1 of <span id='api_page_count'>72</span>"))
+	row := "<tr class='as_results_row' data-appnum='1' data-chic='no'><td></td><td>FAKE ONE<td>XX1<td>AUSTRALIAN SHEPHERD<td>M<td> <td>Jan 1 2024<td>Feb 1 2026<td>25<td>AS-1G25M<td>HIPS</tbody></table>"
+	p, err := ParseResults([]byte("1,439 matches.  Page 1 of <span id='api_page_count'>72</span>" + row))
 	if err != nil || p.Total != 1439 || p.PageCount != 72 {
 		t.Errorf("got %+v %v", p, err)
 	}
@@ -131,8 +145,14 @@ func TestParseDog(t *testing.T) {
 }
 
 func TestParseDogNotFound(t *testing.T) {
-	if _, err := ParseDog([]byte("<div>form only</div>"), "1"); !errors.Is(err, ErrDogNotFound) {
-		t.Errorf("want ErrDogNotFound, got %v", err)
+	if _, err := ParseDog([]byte("<div id='as_detail_full'><table></table></div>"), "1"); !errors.Is(err, ErrDogNotFound) {
+		t.Errorf("detail shell without a name: want ErrDogNotFound, got %v", err)
+	}
+	var ue *UnexpectedResponseError
+	for _, body := range []string{"", "query sql: update X set y [Microsoft][ODBC Driver 17 for SQL Server] The statement has been terminated.", "<html>maintenance</html>"} {
+		if _, err := ParseDog([]byte(body), "1"); !errors.As(err, &ue) {
+			t.Errorf("body %q: want UnexpectedResponseError, got %v", body, err)
+		}
 	}
 }
 

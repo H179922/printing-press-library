@@ -42,7 +42,7 @@ report dates, the sire and dam registration numbers, and related dogs OFA lists.
 			}
 			body, err := c.Get(cmd.Context(), ofa.SearchPath, map[string]string{"a": ofa.DetailRoute, "appnum": appnum})
 			if err != nil {
-				return apiErr(fmt.Errorf("OFA record %s: %w", appnum, err))
+				return classifyAPIErrorOnly(fmt.Errorf("OFA record %s: %w", appnum, err))
 			}
 			d, err := ofa.ParseDog(body, appnum)
 			if errors.Is(err, ofa.ErrDogNotFound) {

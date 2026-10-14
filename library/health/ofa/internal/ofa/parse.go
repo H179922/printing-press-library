@@ -3,6 +3,7 @@
 package ofa
 
 import (
+	"fmt"
 	"html"
 	"regexp"
 	"strconv"
@@ -43,6 +44,10 @@ var (
 	chicAttrRe = regexp.MustCompile(`data-chic='([^']*)'`)
 )
 
+// ResultsPageSize is the number of rows the backend returns on every page
+// except the last.
+const ResultsPageSize = 20
+
 // noMatchesMarker is the text the backend returns when a search matches nothing.
 const noMatchesMarker = "No matches found"
 
@@ -63,7 +68,7 @@ func ParseResults(body []byte) (Page, error) {
 		seg = cutAt(seg, "</table>")
 		cells := cellTexts(seg)
 		if len(cells) < 11 {
-			continue
+			return Page{}, &UnexpectedResponseError{Snippet: fmt.Sprintf("result row with %d cells (want 11): %s", len(cells), snippet(seg))}
 		}
 		r := Row{
 			Name:         cells[1],
@@ -86,6 +91,9 @@ func ParseResults(body []byte) (Page, error) {
 		r.Grade = Grade(r.OFANumber, r.Test)
 		r.Flag = Flag(r.OFANumber)
 		p.Rows = append(p.Rows, r)
+	}
+	if p.Total > 0 && len(p.Rows) == 0 {
+		return Page{}, &UnexpectedResponseError{Snippet: fmt.Sprintf("header reports %d matches but no result rows parsed", p.Total)}
 	}
 	return p, nil
 }
