@@ -1,8 +1,0 @@
-# Root-anchored so cmd/<binary>/ source stays tracked.
-/ofa-pp-cli
-/ofa-pp-cli.exe
-/ofa-pp-mcp
-/ofa-pp-mcp.exe
-/bin/
-/build/
-/dist/
