@@ -1,5 +1,7 @@
 # OFA CLI Brief
 
+> Renamed 2026-10-14: this CLI was first printed as `ofa` and renamed to `ofa-health-clearances` (slug, binary, module) so the name says what it returns. Commands and behavior are unchanged.
+
 Rebuild of the 2026-10-10 sandbox print (lost: local branch `feat/ofa` @ 742b2d4, never pushed).
 Sources: `~/dev-bank/QA/2026-10-10-ofa-*.md` (David-confirmed spec + findings) and live recon 2026-10-13
 (`scratchpad/ofa-recon/`: js.php?id=as client, server-rendered form, one search response, one dog-detail page).
@@ -42,7 +44,7 @@ Sources: `~/dev-bank/QA/2026-10-10-ofa-*.md` (David-confirmed spec + findings) a
 - FTS/search: not needed.
 
 ## Product Thesis
-- Name: ofa-pp-cli
+- Name: ofa-health-clearances-pp-cli
 - Why: OFA has no API, no CLI, no MCP. The website is one-year-at-a-time, 20 rows/page, with no kennel rollup. A buyer or breeder answering "who is actually testing" today does it by hand across dozens of pages.
 
 ## Build Priorities

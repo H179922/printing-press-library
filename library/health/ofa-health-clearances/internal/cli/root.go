@@ -267,8 +267,8 @@ func isCobraUsageError(err error) bool {
 func newRootCmd(flags *rootFlags) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "ofa-health-clearances-pp-cli",
-		Short: `Ofa Health Clearances CLI — Look up dogs' OFA health clearances (hips, elbows, eyes, cardiac, DNA) and CHIC status by breed, age, and report year,…`,
-		Long: `Ofa Health Clearances CLI — Look up dogs' OFA health clearances (hips, elbows, eyes, cardiac, DNA) and CHIC status by breed, age, and report year, and roll them up by kennel.
+		Short: `OFA Health Clearances CLI — Look up dogs' OFA health clearances (hips, elbows, eyes, cardiac, DNA) and CHIC status by breed, age, and report year,…`,
+		Long: `OFA Health Clearances CLI — Look up dogs' OFA health clearances (hips, elbows, eyes, cardiac, DNA) and CHIC status by breed, age, and report year, and roll them up by kennel.
 
 Highlights (not in the official API docs):
   • kennels   See which kennels in a breed are actively health-testing young dogs, ranked by tested dogs, CHIC dogs, and latest test date.
@@ -378,9 +378,16 @@ See README.md or the bundled SKILL.md for recipes.`,
 		// reject the receipt flags instead of silently succeeding without the
 		// requested receipt. 'client migrate' builds its own session and
 		// writes its receipt itself, so the 'client' tree is exempt.
+		// Check the resolved values, not Changed: a saved --profile can set
+		// these without marking the flags changed.
 		if flags.platformSession == nil && !isPlatformClientCommand(cmd) {
+			requested := map[string]bool{
+				"receipt":      flags.receiptEnabled,
+				"receipt-file": strings.TrimSpace(flags.receiptFile) != "",
+				"audit-dir":    strings.TrimSpace(flags.auditDir) != "",
+			}
 			for _, name := range []string{"receipt", "receipt-file", "audit-dir"} {
-				if f := cmd.Flags().Lookup(name); f != nil && f.Changed {
+				if requested[name] {
 					return usageErr(fmt.Errorf("--%s is not supported by this CLI: run receipts require a platform source, and OFA has none", name))
 				}
 			}

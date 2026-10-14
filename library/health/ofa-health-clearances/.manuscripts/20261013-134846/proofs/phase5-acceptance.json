@@ -11,7 +11,7 @@
   "auth_context": {
     "type": "none"
   },
-  "source_fingerprint": "08a4785b7c681d798708746d3b6518f1dc962162521d35eaa44ec2c2578a881c",
+  "source_fingerprint": "d5ee2d3b191e5c52419e862c612a4c0a3a86d6fec074418452fc68f2258d6da2",
   "source_files": {
     "cmd/ofa-health-clearances-pp-cli/main.go": "6b1deebf729e08ed3c557aed438b10c12761606d32f5920ac2b45bd047f7fc13",
     "cmd/ofa-health-clearances-pp-mcp/http_auth_test.go": "28055d449b1bd6942dfac3ecb06fb435fff84015cff7553311a933df14173afd",
@@ -50,7 +50,7 @@
     "internal/cli/playbooks/embed.go": "b431fdf6619dd96ffa9f73fe9b321bd0f1772cfc41641b9f884d51ee6888705d",
     "internal/cli/profile.go": "ef2d4d07bf378bdf7fc52d72b0d023e3dd7391cb955829a4158a6911b5123f21",
     "internal/cli/results.go": "bbf3f3e0b71be689dd207a2db2c69f16dc5800777d5ae971d96d3d5e666d2507",
-    "internal/cli/root.go": "50934259efee6bdb22de5ec08f10740cb533772d351e2a84b5db1dca2cecd213",
+    "internal/cli/root.go": "16c8609640506d76b9287960ffa8d593f5381ecca511549f1578ecf6154afd15",
     "internal/cli/root_test.go": "b4de244a696268ceb43ac65150b07ae1933d16282c2ebc3603e4f9238ed3c454",
     "internal/cli/teach.go": "c26a19dbe2ee0baaa3683b4cdc8e96c9cc156261f4482fe397b213dd1913cda8",
     "internal/cli/teach_playbook.go": "d3bc74959223045c82d216e7542b116709b5e52b498e72fa0cc92b19930af7dd",

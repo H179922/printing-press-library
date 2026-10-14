@@ -9,10 +9,10 @@ are listed as PROPOSED and are NOT shipping scope until David approves them.
 ### Absorbed (match or beat everything that exists)
 | # | Feature | Best Source | Our Implementation | Added Value |
 |---|---------|-------------|--------------------|-------------|
-| 1 | Search health records by breed/test/year/CHIC/sex/registrar/name | ofa.org Advanced Search (web form) | ofa-pp-cli results | Multi-year fan-out fixes the PHP last-value gotcha; follows all pages; --json/--csv/--select |
-| 2 | Dog detail record by appnum incl. sire/dam | ofa.org dog page | ofa-pp-cli dog | Structured per-registry conclusions + sire/dam, agent-native JSON, typed not-found exit |
-| 3 | Breed code lookup | ofa.org form breed list | ofa-pp-cli breeds | Embedded table, offline, substring match |
-| 4 | Test registry code lookup | ofa.org form test list | ofa-pp-cli tests | Embedded table, offline, filter by category/method |
+| 1 | Search health records by breed/test/year/CHIC/sex/registrar/name | ofa.org Advanced Search (web form) | ofa-health-clearances-pp-cli results | Multi-year fan-out fixes the PHP last-value gotcha; follows all pages; --json/--csv/--select |
+| 2 | Dog detail record by appnum incl. sire/dam | ofa.org dog page | ofa-health-clearances-pp-cli dog | Structured per-registry conclusions + sire/dam, agent-native JSON, typed not-found exit |
+| 3 | Breed code lookup | ofa.org form breed list | ofa-health-clearances-pp-cli breeds | Embedded table, offline, substring match |
+| 4 | Test registry code lookup | ofa.org form test list | ofa-health-clearances-pp-cli tests | Embedded table, offline, filter by category/method |
 
 ### Transcendence (only possible with our approach)
 | # | Feature | Command | Score | Buildability | Why Only We Can Do This | Long Description |
