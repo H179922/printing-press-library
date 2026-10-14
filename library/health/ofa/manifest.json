@@ -1,0 +1,27 @@
+{
+  "manifest_version": "0.3",
+  "name": "ofa-pp-mcp",
+  "display_name": "OFA",
+  "version": "1.0.0",
+  "description": "Look up Orthopedic Foundation for Animals health clearances by breed, year, and dog, and roll them up by kennel.",
+  "author": {
+    "name": "CLI Printing Press"
+  },
+  "license": "Apache-2.0",
+  "server": {
+    "type": "binary",
+    "entry_point": "bin/ofa-pp-mcp",
+    "mcp_config": {
+      "command": "${__dirname}/bin/ofa-pp-mcp",
+      "args": []
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=1.0.0",
+    "platforms": [
+      "darwin",
+      "linux",
+      "win32"
+    ]
+  }
+}

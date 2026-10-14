@@ -1,0 +1,55 @@
+version: 2
+project_name: ofa-pp-cli
+changelog:
+  disable: true
+builds:
+  - id: ofa-pp-cli
+    main: ./cmd/ofa-pp-cli
+    binary: ofa-pp-cli
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/mvanhorn/printing-press-library/library/health/ofa/internal/cli.version={{ .Version }}
+    targets:
+      - darwin_amd64
+      - darwin_arm64
+      - linux_amd64
+      - linux_arm64
+      - windows_amd64
+      - windows_arm64
+  - id: ofa-pp-mcp
+    main: ./cmd/ofa-pp-mcp
+    binary: ofa-pp-mcp
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    targets:
+      - darwin_amd64
+      - darwin_arm64
+      - linux_amd64
+      - linux_arm64
+      - windows_amd64
+      - windows_arm64
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+checksum:
+  name_template: checksums.txt
+brews:
+  - name: ofa-pp-cli
+    repository:
+      owner: h179922
+      name: homebrew-tap
+    homepage: "https://github.com/mvanhorn/printing-press-library"
+    description: "Look up Orthopedic Foundation for Animals health clearances by breed, year, and dog, and roll them up by kennel."
+    install: |
+      bin.install "ofa-pp-cli"
+      bin.install "ofa-pp-mcp"

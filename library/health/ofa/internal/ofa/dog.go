@@ -1,0 +1,183 @@
+// Copyright 2026 H179922 and contributors. Licensed under Apache-2.0. See LICENSE.
+
+package ofa
+
+import (
+	"errors"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+// Dog is one dog's published OFA record.
+type Dog struct {
+	AppNum       string       `json:"appnum"`
+	Name         string       `json:"name"`
+	Registration string       `json:"registration"`
+	Sex          string       `json:"sex"`
+	Color        string       `json:"color,omitempty"`
+	Breed        string       `json:"breed"`
+	Born         string       `json:"born,omitempty"`
+	CHIC         bool         `json:"chic"`
+	Sire         string       `json:"sire_registration,omitempty"`
+	Dam          string       `json:"dam_registration,omitempty"`
+	Tests        []TestResult `json:"tests"`
+	Relatives    []Relative   `json:"relatives,omitempty"`
+}
+
+// TestResult is one registry conclusion on a dog's detail record.
+type TestResult struct {
+	Registry   string `json:"registry"`
+	TestDate   string `json:"test_date"`
+	ReportDate string `json:"report_date"`
+	AgeMonths  int    `json:"age_months"`
+	Conclusion string `json:"conclusion"`
+	OFANumber  string `json:"ofa_number"`
+}
+
+// Relative is a related dog listed on a detail record (littermates and other
+// relatives OFA links). Sire and dam appear by registration number on Dog.
+type Relative struct {
+	AppNum       string `json:"appnum"`
+	Name         string `json:"name"`
+	Sex          string `json:"sex"`
+	Relation     string `json:"relation"`
+	Registration string `json:"registration"`
+	Birthdate    string `json:"birthdate"`
+	CHIC         bool   `json:"chic"`
+}
+
+// ErrDogNotFound means the backend returned no detail record for the appnum.
+var ErrDogNotFound = errors.New("no OFA record for that application number")
+
+var (
+	detailNameRe  = regexp.MustCompile(`<span id='as_detail_name'>(.*?)</span>`)
+	detailCHICRe  = regexp.MustCompile(`<div class='as_chic' data-chic='([^']*)'`)
+	sireRe        = regexp.MustCompile(`Sire:\s*([^<]+?)\s*<br`)
+	damRe         = regexp.MustCompile(`Dam:\s*([^<]+?)\s*<br`)
+	detailRowRe   = regexp.MustCompile(`(?s)<tr\s*>(.*?)</tr>`)
+	tdRe          = regexp.MustCompile(`(?s)<td[^>]*>(.*?)</td>`)
+	relativeRowRe = regexp.MustCompile(`(?s)<tr class='as_relatives_row'(.*?)</tr>`)
+	htmlCommentRe = regexp.MustCompile(`(?s)<!--.*?-->`)
+)
+
+// ParseDog parses a dog detail page. appnum is echoed into the result.
+func ParseDog(body []byte, appnum string) (Dog, error) {
+	s := string(body)
+	name := detailNameRe.FindStringSubmatch(s)
+	if name == nil {
+		return Dog{}, ErrDogNotFound
+	}
+	d := Dog{AppNum: appnum, Name: CleanText(name[1])}
+	if c := detailCHICRe.FindStringSubmatch(s); c != nil {
+		d.CHIC = c[1] == "cur"
+	}
+	parseIndividual(s, &d)
+	if m := sireRe.FindStringSubmatch(s); m != nil {
+		d.Sire = CleanText(m[1])
+	}
+	if m := damRe.FindStringSubmatch(s); m != nil {
+		d.Dam = CleanText(m[1])
+	}
+	d.Tests = parseDetailTests(s)
+	d.Relatives = parseRelatives(s)
+	return d, nil
+}
+
+// parseIndividual reads the identity block: registration, "SEX [COLOR] BREED",
+// and "Born <date>" lines, each a <td colspan='3'> cell.
+func parseIndividual(s string, d *Dog) {
+	start := strings.Index(s, "id='as_detail_individual'")
+	if start < 0 {
+		return
+	}
+	block := cutAt(s[start:], "</table>")
+	// The live markup carries a commented-out "<!--<tr><td colspan='3'>-->".
+	block = htmlCommentRe.ReplaceAllString(block, "")
+	var lines []string
+	for _, part := range strings.Split(block, "<td colspan='3'>")[1:] {
+		if t := CleanText(cutAt(part, "<tr", "<td", "</table")); t != "" {
+			lines = append(lines, t)
+		}
+	}
+	for i, line := range lines {
+		switch {
+		case i == 0 && line == d.Name:
+			continue
+		case strings.HasPrefix(line, "Born "):
+			d.Born = NormalizeDate(strings.TrimPrefix(line, "Born "))
+		case strings.HasPrefix(line, "Sire:"), strings.HasPrefix(line, "Dam:"):
+		case d.Registration == "":
+			d.Registration = line
+		case d.Breed == "":
+			d.Sex, d.Color, d.Breed = splitSexColorBreed(line)
+		}
+	}
+}
+
+// splitSexColorBreed splits "M BLACK AUSTRALIAN SHEPHERD" using the embedded
+// breed table to find where the color ends and the breed begins.
+func splitSexColorBreed(line string) (sex, color, breed string) {
+	fields := strings.Fields(line)
+	if len(fields) > 0 && (fields[0] == "M" || fields[0] == "F") {
+		sex, fields = fields[0], fields[1:]
+	}
+	rest := strings.Join(fields, " ")
+	for i := range fields {
+		candidate := strings.Join(fields[i:], " ")
+		if BreedByName(candidate) != nil {
+			return sex, strings.Join(fields[:i], " "), candidate
+		}
+	}
+	return sex, "", rest
+}
+
+func parseDetailTests(s string) []TestResult {
+	out := []TestResult{}
+	start := strings.Index(s, "id='as_detail_tests'")
+	if start < 0 {
+		return out
+	}
+	table := cutAt(s[start:], "</table>")
+	for _, row := range detailRowRe.FindAllStringSubmatch(table, -1) {
+		cells := tdRe.FindAllStringSubmatch(row[1], -1)
+		if len(cells) < 6 {
+			continue
+		}
+		age, _ := strconv.Atoi(CleanText(cells[3][1]))
+		out = append(out, TestResult{
+			Registry:   CleanText(cells[0][1]),
+			TestDate:   NormalizeDate(CleanText(cells[1][1])),
+			ReportDate: NormalizeDate(CleanText(cells[2][1])),
+			AgeMonths:  age,
+			Conclusion: CleanText(cells[4][1]),
+			OFANumber:  CleanText(cells[5][1]),
+		})
+	}
+	return out
+}
+
+func parseRelatives(s string) []Relative {
+	var out []Relative
+	for _, m := range relativeRowRe.FindAllStringSubmatch(s, -1) {
+		cells := cellTexts(m[1])
+		if len(cells) < 6 {
+			continue
+		}
+		r := Relative{
+			Name:         cells[1],
+			Sex:          cells[2],
+			Relation:     cells[3],
+			Registration: cells[4],
+			Birthdate:    NormalizeDate(cells[5]),
+		}
+		if a := appnumRe.FindStringSubmatch(m[1]); a != nil {
+			r.AppNum = a[1]
+		}
+		if c := chicAttrRe.FindStringSubmatch(m[1]); c != nil {
+			r.CHIC = c[1] == "cur"
+		}
+		out = append(out, r)
+	}
+	return out
+}
