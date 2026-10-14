@@ -198,6 +198,21 @@ func TestParseDogRejectsDroppedConclusions(t *testing.T) {
 	if _, err := ParseDog([]byte(beforeTests), "1000003"); !errors.As(err, &ue) {
 		t.Errorf("body cut before the tests table must error, not return no tests: %v", err)
 	}
+	if _, err := ParseDog([]byte(dogFixture), "1000004"); !errors.As(err, &ue) {
+		t.Errorf("detail page for 1000003 requested as 1000004 must error, got %v", err)
+	}
+	beforeRows := dogFixture[:strings.Index(dogFixture, "<tr class='as_relatives_row'")]
+	if _, err := ParseDog([]byte(beforeRows), "1000003"); !errors.As(err, &ue) {
+		t.Errorf("relatives table cut before its rows must error, got %v", err)
+	}
+	unclosedTable := strings.TrimSuffix(dogFixture, "</table>")
+	if _, err := ParseDog([]byte(unclosedTable), "1000003"); !errors.As(err, &ue) {
+		t.Errorf("relatives table that never closes must error, got %v", err)
+	}
+	shortRow := strings.Replace(dogFixture, "<td>Littermate</td> <td>XX00000004</td> <td>Apr 5 2021 </td>", "", 1)
+	if _, err := ParseDog([]byte(shortRow), "1000003"); !errors.As(err, &ue) {
+		t.Errorf("relatives row with too few cells must error, got %v", err)
+	}
 	cutRelatives := dogFixture[:strings.Index(dogFixture, "<td>Littermate</td>")]
 	if _, err := ParseDog([]byte(cutRelatives), "1000003"); !errors.As(err, &ue) {
 		t.Errorf("cut-off relatives table must error, got %v", err)

@@ -60,6 +60,7 @@ var (
 	tdRe          = regexp.MustCompile(`(?s)<td[^>]*>(.*?)</td>`)
 	relativeRowRe = regexp.MustCompile(`(?s)<tr class='as_relatives_row'(.*?)</tr>`)
 	htmlCommentRe = regexp.MustCompile(`(?s)<!--.*?-->`)
+	apiKeyRe      = regexp.MustCompile(`name='api_key' value='(\d*)'`)
 )
 
 // ParseDog parses a dog detail page. appnum is echoed into the result.
@@ -75,6 +76,16 @@ func ParseDog(body []byte, appnum string) (Dog, error) {
 			return Dog{}, ErrDogNotFound
 		}
 		return Dog{}, &UnexpectedResponseError{Snippet: snippet(s)}
+	}
+	// The response names its own dog in the hidden api_key input. Trust that,
+	// not the request, so a misrouted or replayed page can't be attributed to
+	// the wrong appnum.
+	if k := apiKeyRe.FindStringSubmatch(s); k == nil || k[1] != appnum {
+		got := "missing"
+		if k != nil {
+			got = k[1]
+		}
+		return Dog{}, &UnexpectedResponseError{Snippet: fmt.Sprintf("response is for appnum %s, requested %s", got, appnum)}
 	}
 	d := Dog{AppNum: appnum, Name: CleanText(name[1])}
 	if c := detailCHICRe.FindStringSubmatch(s); c != nil {
@@ -198,6 +209,14 @@ func parseDetailTests(s string) ([]TestResult, error) {
 // must close; a cut-off table is an error rather than a shorter list.
 func parseRelatives(s string) ([]Relative, error) {
 	var out []Relative
+	start := strings.Index(s, "id='as_detail_relatives'")
+	if start < 0 {
+		return nil, &UnexpectedResponseError{Snippet: "incomplete detail response (relatives table missing)"}
+	}
+	end := strings.Index(s[start:], "</table>")
+	if end < 0 || start+end < strings.LastIndex(s, "<tr class='as_relatives_row'") {
+		return nil, &UnexpectedResponseError{Snippet: "relatives table does not close after its last row"}
+	}
 	matches := relativeRowRe.FindAllStringSubmatch(s, -1)
 	if opened := strings.Count(s, "<tr class='as_relatives_row'"); opened != len(matches) {
 		return nil, &UnexpectedResponseError{Snippet: fmt.Sprintf("relatives table cut off: %d rows opened, %d closed", opened, len(matches))}
@@ -205,7 +224,7 @@ func parseRelatives(s string) ([]Relative, error) {
 	for _, m := range matches {
 		cells := cellTexts(m[1])
 		if len(cells) < 6 {
-			continue
+			return nil, &UnexpectedResponseError{Snippet: fmt.Sprintf("relatives row with %d cells (want at least 6)", len(cells))}
 		}
 		r := Relative{
 			Name:         cells[1],
