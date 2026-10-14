@@ -146,8 +146,8 @@ func fetchRows(ctx context.Context, c *client.Client, q ofa.Query, maxPages int,
 			if err != nil {
 				return rows, meta, apiErr(err)
 			}
-			if page < p.PageCount && len(p.Rows) < ofa.ResultsPageSize {
-				return rows, meta, apiErr(fmt.Errorf("OFA search (%s page %d of %d) returned %d rows, want %d: incomplete page", labelOr(form.Label), page, p.PageCount, len(p.Rows), ofa.ResultsPageSize))
+			if want := ofa.ExpectedRows(p.Total, page, p.PageCount); p.Total > 0 && len(p.Rows) != want {
+				return rows, meta, apiErr(fmt.Errorf("OFA search (%s page %d of %d, %d matches) returned %d rows, want %d: incomplete page", labelOr(form.Label), page, p.PageCount, p.Total, len(p.Rows), want))
 			}
 			meta.ScannedPages++
 			if page == 1 {

@@ -4,6 +4,7 @@ package ofa
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -33,6 +34,7 @@ type TestResult struct {
 	AgeMonths  int    `json:"age_months"`
 	Conclusion string `json:"conclusion"`
 	OFANumber  string `json:"ofa_number"`
+	Expired    bool   `json:"expired,omitempty"` // OFA marks lapsed time-limited results (e.g. eye exams)
 }
 
 // Relative is a related dog listed on a detail record (littermates and other
@@ -55,7 +57,6 @@ var (
 	detailCHICRe  = regexp.MustCompile(`<div class='as_chic' data-chic='([^']*)'`)
 	sireRe        = regexp.MustCompile(`Sire:\s*([^<]+?)\s*<br`)
 	damRe         = regexp.MustCompile(`Dam:\s*([^<]+?)\s*<br`)
-	detailRowRe   = regexp.MustCompile(`(?s)<tr\s*>(.*?)</tr>`)
 	tdRe          = regexp.MustCompile(`(?s)<td[^>]*>(.*?)</td>`)
 	relativeRowRe = regexp.MustCompile(`(?s)<tr class='as_relatives_row'(.*?)</tr>`)
 	htmlCommentRe = regexp.MustCompile(`(?s)<!--.*?-->`)
@@ -86,7 +87,11 @@ func ParseDog(body []byte, appnum string) (Dog, error) {
 	if m := damRe.FindStringSubmatch(s); m != nil {
 		d.Dam = CleanText(m[1])
 	}
-	d.Tests = parseDetailTests(s)
+	tests, err := parseDetailTests(s)
+	if err != nil {
+		return Dog{}, err
+	}
+	d.Tests = tests
 	d.Relatives = parseRelatives(s)
 	return d, nil
 }
@@ -139,17 +144,32 @@ func splitSexColorBreed(line string) (sex, color, breed string) {
 	return sex, "", rest
 }
 
-func parseDetailTests(s string) []TestResult {
+// parseDetailTests reads the registry table. Every data row must be closed
+// and carry exactly six cells; a malformed row or an unterminated table is an
+// error rather than a silently shorter list of conclusions.
+func parseDetailTests(s string) ([]TestResult, error) {
 	out := []TestResult{}
 	start := strings.Index(s, "id='as_detail_tests'")
 	if start < 0 {
-		return out
+		return out, nil
 	}
-	table := cutAt(s[start:], "</table>")
-	for _, row := range detailRowRe.FindAllStringSubmatch(table, -1) {
-		cells := tdRe.FindAllStringSubmatch(row[1], -1)
-		if len(cells) < 6 {
-			continue
+	if !strings.Contains(s[start:], "</table>") {
+		return nil, &UnexpectedResponseError{Snippet: "unterminated test table"}
+	}
+	// Rows end at <tfoot>; the footer carries unclosed notes such as
+	// "* Eye Certification is valid for one year from the date of the exam."
+	table := cutAt(s[start:], "</table>", "<tfoot")
+	for _, seg := range strings.Split(table, "<tr")[1:] {
+		if !strings.Contains(seg, "<td") {
+			continue // header row (<th> cells)
+		}
+		end := strings.Index(seg, "</tr>")
+		if end < 0 {
+			return nil, &UnexpectedResponseError{Snippet: "unterminated test row: " + snippet(seg)}
+		}
+		cells := tdRe.FindAllStringSubmatch(seg[:end], -1)
+		if len(cells) != 6 {
+			return nil, &UnexpectedResponseError{Snippet: fmt.Sprintf("test row with %d cells (want 6): %s", len(cells), snippet(seg[:end]))}
 		}
 		age, _ := strconv.Atoi(CleanText(cells[3][1]))
 		out = append(out, TestResult{
@@ -159,9 +179,10 @@ func parseDetailTests(s string) []TestResult {
 			AgeMonths:  age,
 			Conclusion: CleanText(cells[4][1]),
 			OFANumber:  CleanText(cells[5][1]),
+			Expired:    strings.Contains(seg[:strings.Index(seg, ">")], "data-expired='Y'"),
 		})
 	}
-	return out
+	return out, nil
 }
 
 func parseRelatives(s string) []Relative {

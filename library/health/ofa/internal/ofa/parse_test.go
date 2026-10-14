@@ -4,6 +4,7 @@ package ofa
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -96,6 +97,17 @@ func TestParseResultsRejectsSilentRowLoss(t *testing.T) {
 	}
 }
 
+func TestExpectedRows(t *testing.T) {
+	cases := []struct{ total, page, pages, want int }{
+		{25, 1, 2, 20}, {25, 2, 2, 5}, {3, 1, 1, 3}, {20, 1, 1, 20}, {1439, 72, 72, 19},
+	}
+	for _, c := range cases {
+		if got := ExpectedRows(c.total, c.page, c.pages); got != c.want {
+			t.Errorf("ExpectedRows(%d,%d,%d)=%d want %d", c.total, c.page, c.pages, got, c.want)
+		}
+	}
+}
+
 func TestParseResultsThousandsSeparator(t *testing.T) {
 	row := "<tr class='as_results_row' data-appnum='1' data-chic='no'><td></td><td>FAKE ONE<td>XX1<td>AUSTRALIAN SHEPHERD<td>M<td> <td>Jan 1 2024<td>Feb 1 2026<td>25<td>AS-1G25M<td>HIPS</tbody></table>"
 	p, err := ParseResults([]byte("1,439 matches.  Page 1 of <span id='api_page_count'>72</span>" + row))
@@ -141,6 +153,40 @@ func TestParseDog(t *testing.T) {
 	}
 	if len(d.Relatives) != 1 || d.Relatives[0].Relation != "Littermate" || d.Relatives[0].AppNum != "1000004" {
 		t.Errorf("relatives wrong: %+v", d.Relatives)
+	}
+}
+
+func TestParseDogRejectsDroppedConclusions(t *testing.T) {
+	var ue *UnexpectedResponseError
+	missingCell := strings.Replace(dogFixture, "<td>EXCELLENT</td>", "", 1)
+	if _, err := ParseDog([]byte(missingCell), "1000003"); !errors.As(err, &ue) {
+		t.Errorf("row missing its conclusion cell must error, got %v", err)
+	}
+	unclosed := strings.Replace(dogFixture, "<td>AS-50E24M-C-NOPI</td></tr>", "<td>AS-50E24M-C-NOPI</td>", 1)
+	if _, err := ParseDog([]byte(unclosed), "1000003"); !errors.As(err, &ue) {
+		t.Errorf("unterminated test row must error, got %v", err)
+	}
+	cut := dogFixture[:strings.Index(dogFixture, "<td>HIPS</td>")+len("<td>HIPS")]
+	if _, err := ParseDog([]byte(cut), "1000003"); !errors.As(err, &ue) {
+		t.Errorf("truncated test table must error, got %v", err)
+	}
+}
+
+func TestParseDogFooterAndExpired(t *testing.T) {
+	withFooter := strings.Replace(dogFixture,
+		"<tr ><td>ELBOW</td>", "<tr data-expired='Y'><td>ELBOW</td>", 1)
+	withFooter = strings.Replace(withFooter,
+		"</tbody></table>\n<table id='as_detail_relatives'>",
+		"</tbody><tfoot>\n<tr><td colspan='6'>* Eye Certification is valid for one year from the date of the exam.\n</tfoot></table>\n<table id='as_detail_relatives'>", 1)
+	if withFooter == dogFixture {
+		t.Fatal("fixture substitution did not apply")
+	}
+	d, err := ParseDog([]byte(withFooter), "1000003")
+	if err != nil {
+		t.Fatalf("footer note must not fail parsing: %v", err)
+	}
+	if len(d.Tests) != 2 || !d.Tests[0].Expired || d.Tests[1].Expired {
+		t.Errorf("want 2 tests, first expired: %+v", d.Tests)
 	}
 }
 

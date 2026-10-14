@@ -48,6 +48,16 @@ var (
 // except the last.
 const ResultsPageSize = 20
 
+// ExpectedRows returns how many rows page (1-based) of a result set with the
+// given total and page count must carry: a full page everywhere except the
+// last, which holds the remainder.
+func ExpectedRows(total, page, pageCount int) int {
+	if page < pageCount {
+		return ResultsPageSize
+	}
+	return total - ResultsPageSize*(pageCount-1)
+}
+
 // noMatchesMarker is the text the backend returns when a search matches nothing.
 const noMatchesMarker = "No matches found"
 
