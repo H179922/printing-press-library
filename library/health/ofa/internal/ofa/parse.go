@@ -58,6 +58,23 @@ func ExpectedRows(total, page, pageCount int) int {
 	return total - ResultsPageSize*(pageCount-1)
 }
 
+// ValidatePage checks page (1-based) of a fanned-out query against the totals
+// page 1 advertised: later pages must repeat the same match count and page
+// count, and every page must carry exactly ExpectedRows rows. A later page
+// that answers "No matches found" fails here instead of silently ending the
+// scan short.
+func ValidatePage(first Page, page int, p Page) error {
+	if page > 1 && (p.Total != first.Total || p.PageCount != first.PageCount) {
+		return &UnexpectedResponseError{Snippet: fmt.Sprintf("page %d reports %d matches over %d pages; page 1 reported %d over %d", page, p.Total, p.PageCount, first.Total, first.PageCount)}
+	}
+	if first.Total > 0 {
+		if want := ExpectedRows(first.Total, page, first.PageCount); len(p.Rows) != want {
+			return &UnexpectedResponseError{Snippet: fmt.Sprintf("page %d of %d (%d matches) returned %d rows, want %d", page, first.PageCount, first.Total, len(p.Rows), want)}
+		}
+	}
+	return nil
+}
+
 // noMatchesMarker is the text the backend returns when a search matches nothing.
 const noMatchesMarker = "No matches found"
 

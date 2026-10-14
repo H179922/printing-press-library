@@ -73,8 +73,19 @@ func printDogHuman(cmd *cobra.Command, d ofa.Dog) error {
 	fmt.Fprintln(w)
 	if len(d.Tests) == 0 {
 		fmt.Fprintln(w, "No published test results.")
-	} else if err := printAutoTable(w, toMaps(d.Tests)); err != nil {
-		return err
+	} else {
+		rows := make([]map[string]any, 0, len(d.Tests))
+		for _, t := range d.Tests {
+			expired := ""
+			if t.Expired {
+				expired = "EXPIRED"
+			}
+			rows = append(rows, map[string]any{"registry": t.Registry, "conclusion": t.Conclusion,
+				"report_date": t.ReportDate, "ofa_number": t.OFANumber, "expired": expired})
+		}
+		if err := printAutoTable(w, rows); err != nil {
+			return err
+		}
 	}
 	if len(d.Relatives) > 0 {
 		fmt.Fprintf(w, "\nRelatives (%d):\n", len(d.Relatives))

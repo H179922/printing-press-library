@@ -147,18 +147,23 @@ func splitSexColorBreed(line string) (sex, color, breed string) {
 // parseDetailTests reads the registry table. Every data row must be closed
 // and carry exactly six cells; a malformed row or an unterminated table is an
 // error rather than a silently shorter list of conclusions.
+// A complete detail response always carries the tests table followed by the
+// as_detail_tools2 toolbar, so a body missing either (or a table that does not
+// close before the toolbar) was cut off and must not read as "no tests".
 func parseDetailTests(s string) ([]TestResult, error) {
-	out := []TestResult{}
 	start := strings.Index(s, "id='as_detail_tests'")
-	if start < 0 {
-		return out, nil
+	toolbar := strings.Index(s, "id='as_detail_tools2'")
+	if start < 0 || toolbar < start {
+		return nil, &UnexpectedResponseError{Snippet: "incomplete detail response (tests table or trailing toolbar missing)"}
 	}
-	if !strings.Contains(s[start:], "</table>") {
+	section := s[start:toolbar]
+	if !strings.Contains(section, "</table>") {
 		return nil, &UnexpectedResponseError{Snippet: "unterminated test table"}
 	}
+	out := []TestResult{}
 	// Rows end at <tfoot>; the footer carries unclosed notes such as
 	// "* Eye Certification is valid for one year from the date of the exam."
-	table := cutAt(s[start:], "</table>", "<tfoot")
+	table := cutAt(section, "</table>", "<tfoot")
 	for _, seg := range strings.Split(table, "<tr")[1:] {
 		if !strings.Contains(seg, "<td") {
 			continue // header row (<th> cells)

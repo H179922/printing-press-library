@@ -116,6 +116,27 @@ func TestParseResultsThousandsSeparator(t *testing.T) {
 	}
 }
 
+func TestValidatePage(t *testing.T) {
+	rows := func(n int) []Row { return make([]Row, n) }
+	first := Page{Total: 25, PageCount: 2, Rows: rows(20)}
+	var ue *UnexpectedResponseError
+	if err := ValidatePage(first, 1, first); err != nil {
+		t.Errorf("valid page 1: %v", err)
+	}
+	if err := ValidatePage(first, 2, Page{Total: 25, PageCount: 2, Rows: rows(5)}); err != nil {
+		t.Errorf("valid page 2: %v", err)
+	}
+	if err := ValidatePage(first, 2, Page{}); !errors.As(err, &ue) {
+		t.Errorf("later 'No matches found' page must error, got %v", err)
+	}
+	if err := ValidatePage(first, 2, Page{Total: 25, PageCount: 2, Rows: rows(4)}); !errors.As(err, &ue) {
+		t.Errorf("short final page must error, got %v", err)
+	}
+	if err := ValidatePage(Page{}, 1, Page{}); err != nil {
+		t.Errorf("no-match query is valid: %v", err)
+	}
+}
+
 const dogFixture = `<input type='hidden' name='api_key' value='1000003'>
 <table id='as_detail_individual'>
 <tr><td colspan='3'><span id='as_detail_name'>FAKEKENNEL BRAVO</span><td rowspan='6'><div class='as_chic' data-chic='cur'></div>
@@ -131,7 +152,7 @@ const dogFixture = `<input type='hidden' name='api_key' value='1000003'>
 <tr ><td>ELBOW</td><td>Jan 14 2026 </td><td>Jan 29 2026 </td><td style='text-align:right'>24</td><td>NORMAL</td><td>AS-EL50M24-C-NOPI</td></tr>
 </tbody><tbody>
 <tr ><td>HIPS</td><td>Jan 14 2026 </td><td>Jan 29 2026 </td><td style='text-align:right'>24</td><td>EXCELLENT</td><td>AS-50E24M-C-NOPI</td></tr>
-</tbody></table>
+</tbody></table><div id='as_detail_tools2'></div>
 <table id='as_detail_relatives'><tbody><tr><th>Full Sibs</th></tr></tbody><tr class='as_relatives_row' data-appnum='1000004' data-chic='no'> <td></td> <td data-sort='X'>FAKEKENNEL CHARLIE</td> <td>F</td> <td>Littermate</td> <td>XX00000004</td> <td>Apr 5 2021 </td> <td><div title='x'>AS-1G24F</div> </tr></table>`
 
 func TestParseDog(t *testing.T) {
@@ -170,14 +191,22 @@ func TestParseDogRejectsDroppedConclusions(t *testing.T) {
 	if _, err := ParseDog([]byte(cut), "1000003"); !errors.As(err, &ue) {
 		t.Errorf("truncated test table must error, got %v", err)
 	}
+	beforeTests := dogFixture[:strings.Index(dogFixture, "<table id='as_detail_tests'>")]
+	if _, err := ParseDog([]byte(beforeTests), "1000003"); !errors.As(err, &ue) {
+		t.Errorf("body cut before the tests table must error, not return no tests: %v", err)
+	}
+	noClose := strings.Replace(dogFixture, "</tbody></table><div id='as_detail_tools2'>", "</tbody><div id='as_detail_tools2'>", 1)
+	if _, err := ParseDog([]byte(noClose), "1000003"); !errors.As(err, &ue) {
+		t.Errorf("tests table must close before the toolbar (not borrow a later </table>): %v", err)
+	}
 }
 
 func TestParseDogFooterAndExpired(t *testing.T) {
 	withFooter := strings.Replace(dogFixture,
 		"<tr ><td>ELBOW</td>", "<tr data-expired='Y'><td>ELBOW</td>", 1)
 	withFooter = strings.Replace(withFooter,
-		"</tbody></table>\n<table id='as_detail_relatives'>",
-		"</tbody><tfoot>\n<tr><td colspan='6'>* Eye Certification is valid for one year from the date of the exam.\n</tfoot></table>\n<table id='as_detail_relatives'>", 1)
+		"</tbody></table><div id='as_detail_tools2'>",
+		"</tbody><tfoot>\n<tr><td colspan='6'>* Eye Certification is valid for one year from the date of the exam.\n</tfoot></table><div id='as_detail_tools2'>", 1)
 	if withFooter == dogFixture {
 		t.Fatal("fixture substitution did not apply")
 	}
